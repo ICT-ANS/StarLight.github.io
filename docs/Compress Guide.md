@@ -23,7 +23,7 @@ nav_order: 3
   model.load_state_dict(checkpoint['state_dict'])
 ```
 
-2. Set `config_list` and choose a suitable `pruner`:
+2. Set `config_list` and choose a suitable pruner:
 
 ```python
   from lib.algorithms.pytorch.pruning import (TaylorFOWeightFilterPruner, FPGMPruner, AGPPruner)
@@ -81,7 +81,7 @@ nav_order: 3
 * `model_masked.pth` includes the model weights and the generated pruning mask.
 * `mask.pth` only includes the generated pruning mask.
 
-4. Export your pruned model
+4. Export your pruned model:
 
 ```python
   from lib.compression.pytorch import ModelSpeedup
@@ -99,12 +99,12 @@ nav_order: 3
 * `input_shape` denotes the shape of your model inputs with `batchsize=1`. 
 * This automatic export method is susceptible to errors when unrecognized structures are present in your model. To assist in resolving any bugs that may arise during the pruning process, we have compiled a summary of known issues in our [Bug Summary](https://github.com/ICT-ANS/StarLight).
 
-5. Fine-tune your pruned model
+5. Fine-tune your pruned model:
 * To fine-tune the pruned model, we recommend following your own pre-training process. 
 * Since the pruned model has pre-trained weights and fewer parameters, we suggest using a smaller `learning_rate` during the fine-tuning process.
 
 ## Quantization
-1. Load your pre-trained network
+1. Load your pre-trained network:
 
 ```python
   # get YourPretarinedNetwork and load pre-trained weights for it
@@ -112,7 +112,7 @@ nav_order: 3
   model.load_state_dict(checkpoint['state_dict'])
 ```
 
-2. Initialize the dataloader.
+2. Initialize the dataloader:
 
 ```python
   import torchvision.datasets as datasets
@@ -138,7 +138,7 @@ nav_order: 3
 
 * `calib_loader` uses a subset from the training dataset to calibrate during subsequent quantization.
 
-3. Specify `quan_mode` and output paths of onnx, trt, and cache.
+3. Specify `quan_mode` and output paths of onnx, trt, and cache:
 
 ```python
   onnx_path = os.path.join(args.save_dir, '{}_{}.onnx'.format(args.model, args.quan_mode))
@@ -155,7 +155,7 @@ nav_order: 3
       extra_layer_bit = 32
 ```
 
-4. Define the `engine` for inference.
+4. Define the `engine` for inference:
 
 ```python
   from lib.compression.pytorch.quantization_speedup import ModelSpeedupTensorRT
@@ -177,7 +177,7 @@ nav_order: 3
       engine.load_quantized_model(trt_path)
 ```
 
-5. Use the `engine` for inference.
+5. Use the `engine` for inference:
 
 ```python
   loss, top1, infer_time = validate(engine, val_loader, criterion)
