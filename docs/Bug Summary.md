@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Bug Summary
-nav_order: 2
+nav_order: 9
 ---
 
 # Bug Summary
