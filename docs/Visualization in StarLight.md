@@ -26,7 +26,8 @@ nav_order: 4
 
 ## Generate necessary information during your pruning or quantization.
 * Before pruning or quantization, add the code below:
-```
+
+```python
   # for pruning or quantization
   if args.write_yaml:
       flops, params, _ = count_flops_params(model, (1, 3, 64, 64), verbose=False)
@@ -44,7 +45,8 @@ nav_order: 4
 ```
 
 * After pruning (usually requires fine-tuning) or quantization, add the code below:
-```
+
+```python
   # for pruning: 
   if epoch == args.finetune_epochs - 1:
       if args.write_yaml and not args.no_write_yaml_after_prune:
@@ -73,14 +75,13 @@ nav_order: 4
             'Output_file': os.path.join(args.save_dir, '{}_{}.trt'.format(args.model, args.quan_mode)),
         }
         yaml.dump(yaml_data, f)
-
 ```
-
 
 ## (Optional) Compress your network in StarLight using the online mode.
 * Create a script `compress.sh` in the folder of `algorithms/compression/nets/YOUR_MODEL/shell`.
 * Define the required hyper-parameters as below:
-```
+
+```python
   dataset=$1
   model=$2
   prune_method=$3
@@ -94,6 +95,7 @@ nav_order: 4
   output_path=${11}
   dataset_path=${12}
 ```
+
 * Use the above hyper-parameters to start your pruning or quantization. Please refer to our provided examples in `algorithms/compression/nets/ResNet50/shell/compress.sh` to write your startup command.
 
 ## Visualization of network features.
