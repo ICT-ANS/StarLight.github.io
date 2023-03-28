@@ -81,7 +81,7 @@ nav_order: 4
 * Create a script `compress.sh` in the folder of `algorithms/compression/nets/YOUR_MODEL/shell`.
 * Define the required hyper-parameters as below:
 
-```python
+```shell
   dataset=$1
   model=$2
   prune_method=$3
