@@ -484,66 +484,67 @@ pred1_s2 = pred1_s2[:, 0, :, :]
 
 ## HSMNet (Location)
 
-### 剪枝问题记录
+### Pruning
 
-1. 剪枝后，模型前向传播通道无法对齐。
-* 解决：根据报错信息，检查通道无法对齐的卷积层的取整问题。
+1. After pruning, the forward propagation channel of the model cannot be aligned.
 
-### 量化问题记录
+- Solution: Based on the error message, check the rounding problem of the convolution layer whose channels cannot be aligned.
 
-1. torch.squeeze引发的IF判断无法识别
+### Quantization
+
+1. IF judgment cannot be recognized due to torch.squeeze 
 ![img](../assets/images-bugs/starlight_bugs_20230329115940176.png)
-* 原因：torch.squeeze压缩维度时，需要判断该维度是否为1。若判断成功则会在ONNX模型中引入IF节点，导致TensorRT转换不成功。
-* 解决：如下代码所示，不使用squeeze函数，直接使用切片函数即可。
+- Reason: When using torch.squeeze to compress dimensions, it is necessary to check whether the dimension is 1. If the check is successful, an IF node will be introduced in the ONNX model, causing TensorRT conversion to fail.
+- Solution: Use slicing function instead of using the squeeze function, as shown in the code below.
 ```python
-      # 下方代码会引发上述错误
+      # code with error
       # return fvl, costl.squeeze(1)
-      # 修改为以下代码即可
+      # code without error
       return fvl, costl[:, 0, :, :, :]
-      # 和上述相同问题，解决方案也相同
+      # same problem with the above
       # return pred3, torch.squeeze(entropy)
       return pred3, entropy[0, :, :]
 ```
-2. 加载预训练权重无法获得预训练性能
+2. Loading pre-trained weights fails to achieve pre-training performance.
 ![img](../assets/images-bugs/starlight_bugs_20230329115940442.png)
-* 原因：原始模型是在多卡训练的，预训练权重中的操作名称包含'module.'，导致大部分操作没有加载；而由于该网络预训练权重中的操作和模型定义时的操作略有不同，因此加载权重时设置匹配strict=False，所以没有检查出上述问题，最终导致测试时精度很低。
-* 解决：去除预训练权重中操作名称的'module.'前缀。
-3. 测试集模型输入尺寸全都不一致
+* Reason: The original model was trained on multiple GPUs, and the operation names in the pre-trained weights contain the prefix 'module.', resulting in the failure to load most operations. Since there are slight differences between the operations in the pre-trained weights and the model definition, when loading the weights, the matching is set to strict=False, which did not detect the above problem and eventually led to low accuracy during testing.
+* Solution: Remove the 'module.' prefix from the operation names in the pre-trained weights.
+
+3. Inconsistent input sizes in the test dataset.
 ![img](../assets/images-bugs/starlight_bugs_20230329115941267.png)
-* 解决：此问题说明该定位模型需要处理输入尺寸不一致的数据，而模型量化需要固定模型的输入尺寸。因此，该模型无法进行量化。
+* Solution: This issue indicates that the localization model needs to handle input data with inconsistent sizes, while model quantization requires fixed input sizes. Therefore, this model cannot be quantized.
 
 ## PMR-CNN（Few-shot Object Detection）
 
-### 剪枝问题记录
+### Pruning
 
-1. 输入格式问题。
-* 原因：PMR-CNN是基于detectron2框架进行设计的，其输入为字典格式，而pruner的输入要求为tensor。
-* 解决：进入到inference模块里面，将字典的其他key值写成固定值，'image'部分作为dummy_input，只输入tensor
+1. Input format issue.
+
+- Cause: PMR-CNN is designed based on the detectron2 framework, which requires inputs in dictionary format, while the input format required by the pruner is tensor.
+- Solution: Enter the inference module and write other key values in the dictionary as fixed values. Use the 'image' part as dummy_input and only input tensor.
 ![img](../assets/images-bugs/starlight_bugs_20230329115941309.png)![img](../assets/images-bugs/starlight_bugs_20230329115947050.png)
 
-2. Pytorch 1.6版本中tensor和int不能直接用'/'计算除法。
-* 解决：用'//'代替'/'
+2. In PyTorch 1.6, tensors and ints cannot be directly divided using '/'.
+- Solution: Use '//' instead of '/'.
 ![img](../assets/images-bugs/starlight_bugs_20230329115940886.png)
 
-3. 计算图报错。当模型跑完前向传播并将结果返回时就自动结束了。
-* 原因：输出格式为detectron2的特殊格式，graph_utils识别不了
-* 解决：用backbone代替model进行剪枝，只剪枝backbone部分
+3. Calculation graph error. The program ends automatically after the model finishes the forward propagation and returns the result.
+- Cause: The output format is a special format of detectron2, which cannot be recognized by graph_utils.
+- Solution: Use backbone instead of model for pruning, and only prune the backbone part.
 ![img](../assets/images-bugs/starlight_bugs_20230329115942777.png)![img](../assets/images-bugs/starlight_bugs_20230329115942130.png)
 
-4. wrapper.name对不上。
-* 原因：curnode.op_type == 'aten::_convolution'，没有做这个判断，导致parent_layers为空，进而影响了channel_depen为空
-* 解决：detectron2对模型层名做了额外的封装，nni无法识别及分类
+4. Wrapper.name does not match.
+- Cause: curnode.op_type == 'aten::_convolution', this judgment is not made, resulting in empty parent_layers, which in turn affects channel_depen.
+- Solution: detectron2 has made additional encapsulation on model layer names, which cannot be recognized and classified by NNI.
 ![img](../assets/images-bugs/starlight_bugs_20230329115942831.png)![img](../assets/images-bugs/starlight_bugs_20230329115944031.png)
 ![img](../assets/images-bugs/starlight_bugs_20230329115943079.png)
 ![img](../assets/images-bugs/starlight_bugs_20230329115942986.png)
 
-5. self.channel_depen.dependency_sets的值一直为空。
-* 原因：定位到赋值dependency_sets的地方，发现在graph_utils.py中name_to_node对不上，detectron2封装模型的层名在nni中识别不出来，修改pth文件也不行。
-
+5. The value of self.channel_depen.dependency_sets is always empty.
+- Cause: Locate the place where dependency_sets is assigned and find that name_to_node in graph_utils.py does not match, and the layer names of the detectron2 encapsulated model cannot be recognized and classified by NNI even if the pth file is modified.
 ![img](../assets/images-bugs/starlight_bugs_20230329115945177.png)![img](../assets/images-bugs/starlight_bugs_20230329115945196.png)
 ![img](../assets/images-bugs/starlight_bugs_20230329115943915.png)![img](../assets/images-bugs/starlight_bugs_20230329115945603.png)
 
-### 量化问题记录
 
 ## FasterRCNN（Object Detection）
 
