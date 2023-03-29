@@ -14,7 +14,7 @@ nav_order: 9
 
 ---
 
-## ResNet50-SSD (Detection)
+## ResNet50-SSD (Object Detection)
 
 ### 剪枝问题记录
 
@@ -174,7 +174,7 @@ The element type in the input tensor is not defined.
 2. 缺少prettytable
 * 解决：使用pip安装即可。
 
-## VGG-SSD (Detection)
+## VGG-SSD (Object Detection)
 
 ### 剪枝问题记录
 
@@ -191,7 +191,7 @@ The element type in the input tensor is not defined.
 ![img](../assets/images-bugs/starlight_bugs_20230329115945106.png)
 * 解决：直接用torch.onnx.export()
 
-## YOLOv5 (Detection)
+## YOLOv5 (Object Detection)
 
 ### 剪枝问题记录
 
