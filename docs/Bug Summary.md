@@ -1,6 +1,18 @@
+---
+layout: default
+title: Bug Summary
+nav_order: 9
+---
 # Bug Summary
+{: .no_toc }
 
-飞书链接：[StarLight轻量化Bug及解决方案汇总](https://bytedancecampus1.feishu.cn/docx/R9nedMz0Do0CA8xL0nxcvucHn0f)    密码：iiVy
+## Table of contents
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
+---
 
 ## ResNet50-SSD (Detection)
 
