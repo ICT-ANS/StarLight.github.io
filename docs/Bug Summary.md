@@ -19,70 +19,74 @@ nav_order: 9
 ### 剪枝问题记录
 
 1. 使用FPGM方法时，torch.jit.trace无法追踪模型
-   1. 原因：模型有三个输出，如下。其中第三个输出self.priors为常量，与输入无关，导致上述问题
-   2. ![img](../assets/images-bugs/starlight_bugs_20230329115935476.png)
+* 原因：模型有三个输出，如下。其中第三个输出self.priors为常量，与输入无关，导致上述问题
+![img](../assets/images-bugs/starlight_bugs_20230329115935476.png)
 
-   3. 解决：重写一个SSD模型文件，仅需改变两点。（1）将输出self.priors从SSD的forward函数中移出（2）在计算loss间，将self.priors放入output中
-   4. ![img](../assets/images-bugs/starlight_bugs_20230329115935488.png)
-
+* 解决：重写一个SSD模型文件，仅需改变两点。（1）将输出self.priors从SSD的forward函数中移出（2）在计算loss间，将self.priors放入output中
+![img](../assets/images-bugs/starlight_bugs_20230329115935488.png)
 ![img](../assets/images-bugs/starlight_bugs_20230329115935446.png)
 
-1. 导出剪枝模型后，推理时报错
-   1. shape '[32, -1, 4]' is invalid for input of size 915904
+2. 导出剪枝模型后，推理时报错
+```python
+shape '[32, -1, 4]' is invalid for input of size 915904
+File "/home/yanglongxing/project/Compress_ResNet50_Detection/prune_model.py", line 172, in forward (Current frame)    
+    output = (arm_loc.view(arm_loc.size(0), -1, 4),
+File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/site-packages/torch/nn/modules/module.py", line 722, in _call_impl    
+    result = self.forward(*input, **kwargs)  
+File "/home/yanglongxing/project/Compress_ResNet50_Detection/prune.py", line 135, in eval_net    
+    output = net(x)  
+File "/home/yanglongxing/project/Compress_ResNet50_Detection/prune.py", line 317, in main    
+    eval_net(val_dataset, val_loader, net, detector, cfg, ValTransform, top_k, thresh=thresh, batch_size=batch_size)  
+File "/home/yanglongxing/project/Compress_ResNet50_Detection/prune.py", line 324, in <module>    
+    main()  
+File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 85, in _run_code    
+    exec(code, run_globals)  
+File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 96, in _run_module_code    
+    mod_name, mod_spec, pkg_name, script_name)  
+File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 263, in run_path    
+    pkg_name=pkg_name, script_name=fname)  
+File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 85, in _run_code    
+    exec(code, run_globals)  
+File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 193, in _run_module_as_main    
+    "__main__", mod_spec)
+```
+* 原因：模型输出的loc和cls是通过卷积得到的，而剪枝会剪掉这些输出层的卷积，导致输出尺寸变小，从而报错
+* 解决：添加op_names,仅剪枝非输出层的卷积
+3. nms在服务器上时间过慢
 
-   2.   File "/home/yanglongxing/project/Compress_ResNet50_Detection/prune_model.py", line 172, in forward (Current frame)    output = (arm_loc.view(arm_loc.size(0), -1, 4),  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/site-packages/torch/nn/modules/module.py", line 722, in _call_impl    result = self.forward(*input, **kwargs)  File "/home/yanglongxing/project/Compress_ResNet50_Detection/prune.py", line 135, in eval_net    output = net(x)  File "/home/yanglongxing/project/Compress_ResNet50_Detection/prune.py", line 317, in main    eval_net(val_dataset, val_loader, net, detector, cfg, ValTransform, top_k, thresh=thresh, batch_size=batch_size)  File "/home/yanglongxing/project/Compress_ResNet50_Detection/prune.py", line 324, in <module>    main()  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 85, in _run_code    exec(code, run_globals)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 96, in _run_module_code    mod_name, mod_spec, pkg_name, script_name)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 263, in run_path    pkg_name=pkg_name, script_name=fname)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 85, in _run_code    exec(code, run_globals)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 193, in _run_module_as_main    "__main__", mod_spec)
-
-   3. 原因：模型输出的loc和cls是通过卷积得到的，而剪枝会剪掉这些输出层的卷积，导致输出尺寸变小，从而报错
-   4. 解决：添加op_names,仅剪枝非输出层的卷积
-2. nms在服务器上时间过慢
-   1. ![img](../assets/images-bugs/starlight_bugs_20230329115935418.png)
-
-   2. 原因：nms是在cpu运行的，而服务器上有太多程序在跑，导致cpu负载过大
-   3. 解决：在gpu上使用nms
+![img](../assets/images-bugs/starlight_bugs_20230329115935418.png)
+* 原因：nms是在cpu运行的，而服务器上有太多程序在跑，导致cpu负载过大 
+* 解决：在gpu上使用nms
 
 ![img](../assets/images-bugs/starlight_bugs_20230329115935429.png)
 
-​      **补充**：**不建议使用gpu的nms**，因为会导致代码在forward的时候出错，包括https://www.cnblogs.com/naive-LR/p/14256624.html和https://blog.csdn.net/m0_38007695/article/details/107065617，后者的解决方案无效。
+**补充**：**不建议使用gpu的nms**，因为会导致代码在forward的时候出错，包括https://www.cnblogs.com/naive-LR/p/14256624.html和https://blog.csdn.net/m0_38007695/article/details/107065617，后者的解决方案无效。
 
-1. 模型剪枝后微调前推理会报如下错误：
-   1. Traceback (most recent call last):
-
-   2.   File "prune.py", line 409, in <module>
-
-   3. ​    main()
-
-   4.   File "prune.py", line 378, in main
-
-   5. ​    eval_net(val_dataset, val_loader, net, detector, cfg, ValTransform, os.path.join(args.save_folder, 'after_prune'), top_k, thresh=thresh, batch_size=batch_size)
-
-   6.   File "prune.py", line 175, in eval_net
-
-   7. ​    val_dataset.evaluate_detections(all_boxes, eval_save_folder)
-
-   8.   File "/home/yanglongxing/project/Compress_ResNet50_Detection/SSD_Pytorch/data/voc0712.py", line 224, in evaluate_detections
-
-   9. ​    self._do_python_eval(output_dir)
-
-   10.   File "/home/yanglongxing/project/Compress_ResNet50_Detection/SSD_Pytorch/data/voc0712.py", line 280, in _do_python_eval
-
-   11. ​    use_07_metric=use_07_metric)
-
-   12.   File "/home/yanglongxing/project/Compress_ResNet50_Detection/SSD_Pytorch/data/voc_eval.py", line 158, in voc_eval
-
-   13. ​    BB = BB[sorted_ind, :]
-
-   14. IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
-
-   15. 原因：剪枝后微调前精度很差，模型检测不出物体，bounding box为空，此时BB = BB[sorted_ind, :]中的sorted_ind为空list，导致出错
-   16. 解决：在SSD_Pytorch/data/voc_eval.py中修改两处（约143行和193行），修改如下
-
+4. 模型剪枝后微调前推理会报如下错误：
+```python
+Traceback (most recent call last):
+  File "prune.py", line 409, in <module>
+    main()
+  File "prune.py", line 378, in main
+    eval_net(val_dataset, val_loader, net, detector, cfg, ValTransform, os.path.join(args.save_folder, 'after_prune'), top_k, thresh=thresh, batch_size=batch_size)
+  File "prune.py", line 175, in eval_net
+    val_dataset.evaluate_detections(all_boxes, eval_save_folder)
+  File "/home/yanglongxing/project/Compress_ResNet50_Detection/SSD_Pytorch/data/voc0712.py", line 224, in evaluate_detections
+    self._do_python_eval(output_dir)
+  File "/home/yanglongxing/project/Compress_ResNet50_Detection/SSD_Pytorch/data/voc0712.py", line 280, in _do_python_eval
+    use_07_metric=use_07_metric)
+  File "/home/yanglongxing/project/Compress_ResNet50_Detection/SSD_Pytorch/data/voc_eval.py", line 158, in voc_eval
+    BB = BB[sorted_ind, :]
+IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
+```
+* 原因：剪枝后微调前精度很差，模型检测不出物体，bounding box为空，此时BB = BB[sorted_ind, :]中的sorted_ind为空list，导致出错
+* 解决：在SSD_Pytorch/data/voc_eval.py中修改两处（约143行和193行），修改如下
 ![img](../assets/images-bugs/starlight_bugs_20230329115935533.png)
-
 ![img](../assets/images-bugs/starlight_bugs_20230329115935583.png)
 
-1. 模型剪枝后精度很难恢复
-   1. 原因：模型微调前，使用剪枝前的optimizer，导致优化参数是剪枝前的参数，而非导出剪枝模型后的参数，所以微调效果有限
-   2. 解决：微调前重新定义optimizer
+5模型剪枝后精度很难恢复 
+* 原因：模型微调前，使用剪枝前的optimizer，导致优化参数是剪枝前的参数，而非导出剪枝模型后的参数，所以微调效果有限
+* 解决：微调前重新定义optimizer
 
 ![img](../assets/images-bugs/starlight_bugs_20230329115935609.png)
 
@@ -91,113 +95,75 @@ nav_order: 9
 1. lib包中的ModelSpeedupTensorRT的inference仅支持单输出，而检测模型是二输出
    1. 解决：新建一个quan_model.py，重写SSD模型，修改内容为添加一个inference函数，作用是调用量化的trt模型得到双输出结果。修改如下：
 
-（1）SSD模型添加load_engine函数
+* SSD模型添加load_engine函数
 
 ![img](../assets/images-bugs/starlight_bugs_20230329115935595.png)
 
-   （2）SSD模型添加inference(self, x)，注意：由于要torch转onnx，所以要参考剪枝问题1设计模型
+* SSD模型添加inference(self, x)，注意：由于要torch转onnx，所以要参考剪枝问题1设计模型
 
+```python
 def inference(self, x):
+        """
+        Do inference by tensorrt builded engine.
 
-​        """
+        Parameters
+        ----------
+        x : pytorch tensor
+            Model input tensor
+        """
+        # convert pytorch tensor to numpy darray
+        self.batchssize = 1
+        if x.device != torch.device("cpu"):
+            x = x.to("cpu")
+        x = np.ascontiguousarray(x.numpy())
+        # Numpy dtype should be float32
+        assert x.dtype == np.float32
+        elapsed_time = 0
+        inputs, outputs, bindings, stream = common.allocate_buffers(self.engine.context.engine)
+        result_cls = []
+        result_loc = []
+        for start_idx in range(0, x.shape[0], self.batchsize):
+            # If the number of images in the test set is not divisible by the batch size, the last batch will be smaller.
+            # This logic is used for handling that case.
+            end_idx = min(start_idx + self.batchsize, x.shape[0])
+            effective_batch_size = end_idx - start_idx
+            # Do inference for every batch.
+            inputs[0].host = x[start_idx:start_idx + effective_batch_size]
+            t1 = time.time()
+            outputs = common.do_inference_v2(self.engine.context, bindings=bindings, inputs=inputs, outputs=outputs, stream=stream)
+            elapsed_time += time.time() - t1
+            shape = outputs[0].shape[0]
+            cls = outputs[0][0:int(shape * effective_batch_size / self.batchsize)].reshape(effective_batch_size, 8732, 4)
+            result_cls.append(cls.copy())
+            shape = outputs[1].shape[0]
+            loc = outputs[1][0:int(shape * effective_batch_size / self.batchsize)].reshape(effective_batch_size, 8732, 21)
+            result_loc.append(loc.copy())
+            # Use argmax to get predictions and then check accuracy
+        # convert numpy darray to pytorch tensor
+        result_cls = torch.Tensor(np.concatenate(result_cls))
+        result_loc = torch.Tensor(np.concatenate(result_loc))
+        return result_cls, result_loc, elapsed_time
+```
 
-​        Do inference by tensorrt builded engine.
-
-​        Parameters
-
-​        \----------
-
-​        x : pytorch tensor
-
-​            Model input tensor
-
-​        """
-
-​        *# convert pytorch tensor to numpy darray*
-
-​        *self*.batchssize = 1
-
-​        if x.device != torch.device("cpu"):
-
-​            x = x.to("cpu")
-
-​        x = np.ascontiguousarray(x.numpy())
-
-​        *# Numpy dtype should be float32*
-
-​        assert x.dtype == np.float32
-
-​        elapsed_time = 0
-
-​        inputs, outputs, bindings, stream = common.allocate_buffers(*self*.engine.context.engine)
-
-​        result_cls = []
-
-​        result_loc = []
-
-​        for start_idx in range(0, x.shape[0], *self*.batchsize):
-
-​            *# If the number of images in the test set is not divisible by the batch size, the last batch will be smaller.*
-
-​            *# This logic is used for handling that case.*
-
-​            end_idx = min(start_idx + *self*.batchsize, x.shape[0])
-
-​            effective_batch_size = end_idx - start_idx
-
-​            *# Do inference for every batch.*
-
-​            inputs[0].host = x[start_idx:start_idx + effective_batch_size]
-
-​            t1 = time.time()
-
-​            outputs = common.do_inference_v2(*self*.engine.context, bindings=bindings, inputs=inputs, outputs=outputs, stream=stream)
-
-​            elapsed_time += time.time() - t1
-
-​            shape = outputs[0].shape[0]
-
-​            *cls* = outputs[0][0:int(shape * effective_batch_size / *self*.batchsize)].reshape(effective_batch_size, 8732, 4)
-
-​            result_cls.append(*cls*.copy())
-
-​            shape = outputs[1].shape[0]
-
-​            loc = outputs[1][0:int(shape * effective_batch_size / *self*.batchsize)].reshape(effective_batch_size, 8732, 21)
-
-​            result_loc.append(loc.copy())
-
-​            *# Use argmax to get predictions and then check accuracy*
-
-​        *# convert numpy darray to pytorch tensor*
-
-​        result_cls = torch.Tensor(np.concatenate(result_cls))
-
-​        result_loc = torch.Tensor(np.concatenate(result_loc))
-
-​        return result_cls, result_loc, elapsed_time
-
-​        （3）推理前load_engine，推理中调用inference函数
+* 推理前load_engine，推理中调用inference函数
 
 ![img](../assets/images-bugs/starlight_bugs_20230329115935609-0062375.png)
 
 ![img](../assets/images-bugs/starlight_bugs_20230329115935623.png)
 
-1. 模型compress时，报如下错误：
-   1. TypeError       (note: full exception trace is shown but execution is paused at: <module>)
+2. 模型compress时，报如下错误：
+```python
+TypeError       (note: full exception trace is shown but execution is paused at: <module>)
+The element type in the input tensor is not defined.
+  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/site-packages/onnx/numpy_helper.py", line 37, in to_array    raise TypeError("The element type in the input tensor is not defined.")  File "/home/yanglongxing/project/Compress_ResNet50_Detection/lib/compression/pytorch/quantization_speedup/frontend_to_onnx.py", line 82, in unwrapper    index = int(onnx.numpy_helper.to_array(const_nd.attribute[0].t))  File "/home/yanglongxing/project/Compress_ResNet50_Detection/lib/compression/pytorch/quantization_speedup/frontend_to_onnx.py", line 144, in torch_to_onnx    model_onnx, onnx_config = unwrapper(model_onnx, index2name, config)  File "/home/yanglongxing/project/Compress_ResNet50_Detection/lib/compression/pytorch/quantization_speedup/integrated_tensorrt.py", line 303, in compress    _, self.onnx_config = fonnx.torch_to_onnx(self.model, self.config, input_shape=self.input_shape, model_path=self.onnx_path, input_names=self.input_names, output_names=self.output_names)  File "/home/yanglongxing/project/Compress_ResNet50_Detection/quan.py", line 229, in main    engine.compress()  File "/home/yanglongxing/project/Compress_ResNet50_Detection/quan.py", line 241, in <module> (Current frame)    main()  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 85, in _run_code    exec(code, run_globals)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 96, in _run_module_code    mod_name, mod_spec, pkg_name, script_name)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 263, in run_path    pkg_name=pkg_name, script_name=fname)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 85, in _run_code    exec(code, run_globals)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 193, in _run_module_as_main    "__main__", mod_spec)
+```
 
-   2. The element type in the input tensor is not defined.
-
-   3.   File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/site-packages/onnx/numpy_helper.py", line 37, in to_array    raise TypeError("The element type in the input tensor is not defined.")  File "/home/yanglongxing/project/Compress_ResNet50_Detection/lib/compression/pytorch/quantization_speedup/frontend_to_onnx.py", line 82, in unwrapper    index = int(onnx.numpy_helper.to_array(const_nd.attribute[0].t))  File "/home/yanglongxing/project/Compress_ResNet50_Detection/lib/compression/pytorch/quantization_speedup/frontend_to_onnx.py", line 144, in torch_to_onnx    model_onnx, onnx_config = unwrapper(model_onnx, index2name, config)  File "/home/yanglongxing/project/Compress_ResNet50_Detection/lib/compression/pytorch/quantization_speedup/integrated_tensorrt.py", line 303, in compress    _, self.onnx_config = fonnx.torch_to_onnx(self.model, self.config, input_shape=self.input_shape, model_path=self.onnx_path, input_names=self.input_names, output_names=self.output_names)  File "/home/yanglongxing/project/Compress_ResNet50_Detection/quan.py", line 229, in main    engine.compress()  File "/home/yanglongxing/project/Compress_ResNet50_Detection/quan.py", line 241, in <module> (Current frame)    main()  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 85, in _run_code    exec(code, run_globals)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 96, in _run_module_code    mod_name, mod_spec, pkg_name, script_name)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 263, in run_path    pkg_name=pkg_name, script_name=fname)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 85, in _run_code    exec(code, run_globals)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 193, in _run_module_as_main    "__main__", mod_spec)
-
-   4. 解决：注释*fonnx.torch_to_onnx，*直接用torch导出onnx模型。
-
+* 解决：注释*fonnx.torch_to_onnx，*直接用torch导出onnx模型。
 ![img](../assets/images-bugs/starlight_bugs_20230329115936123.png)
 
-1. 模型量化后速度比不量化前慢
-   1. 原因：量化时间把数据从cpu->gpu和从gpu->cpu的时间算上了，所以变慢
-   2. 解决：只计算gpu推理时间，去掉上述两块时间。具体方法是在quan_model.py中的SSD类中添加如下函数，返回的infer_time即为推理时间。
-
+3. 模型量化后速度比不量化前慢
+* 原因：量化时间把数据从cpu->gpu和从gpu->cpu的时间算上了，所以变慢
+* 解决：只计算gpu推理时间，去掉上述两块时间。具体方法是在quan_model.py中的SSD类中添加如下函数，返回的infer_time即为推理时间。
 ![img](../assets/images-bugs/starlight_bugs_20230329115935796-0062375.png)
 
 ## UNet (Drivable Space)
@@ -209,18 +175,14 @@ def inference(self, x):
    2. 解决：经过分析发现，Pad为无效操作，因为其Pad的尺寸为0。将Pad操作删除后，NNI便可正确解析。
 2. 新模型的Pad操作不能去掉，所以需要提供新的解决方法。
    1. 原因：nni在解析Pytorch节点时，需要获取节点的输入，而对于*F.pad(x1, (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2))操作，第二项输入(diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2)非Tensor，aten::，prim::ListUnpack，prim::TupleUnpack，所以不能被成功解析，导致pad节点的输入只有x1，导致nni导出失败。*
-   2.  解决：不在forward函数中提供第二项输入，而是新建一个Pad类并在init中初始化第二项
-
+   2. 解决：不在forward函数中提供第二项输入，而是新建一个Pad类并在init中初始化第二项
 ![img](../assets/images-bugs/starlight_bugs_20230329115935951.png)
 
    同时，需要在lib/compression/pytorch/speedup/compress_modules.py中添加对该Module的支持。
-
 ![img](../assets/images-bugs/starlight_bugs_20230329115935796.png)
 
  实践中，训练和推理分辨率不同，Pad的尺寸也不同，需要在model中添加如下函数，并在训练或/推理前提供分辨率
-
 ![img](../assets/images-bugs/starlight_bugs_20230329115935916.png)
-
 ![img](../assets/images-bugs/starlight_bugs_20230329115935920.png)
 
 ### 量化问题记录
