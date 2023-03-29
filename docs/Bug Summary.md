@@ -177,7 +177,7 @@ Solution: net = UNet(n_channels=3, n_classes=1, bilinear=False).to(device).
 
 ## PSPNet (Semantic Segmentation)
 
-### Pruning Issues
+### Pruning
 
 1. For the down-sampling layer, the residual has convolutional layers, and the channel addition between the pruned residual and the pruned main branch does not correspond.
 
@@ -187,7 +187,7 @@ Solution: net = UNet(n_channels=3, n_classes=1, bilinear=False).to(device).
 
 - Solution: Use only 10 images for model testing and determine the stopping point.
 
-### Quantization Issues
+### Quantization
 
 1. When exporting the model, RuntimeError: ONNX export failed: Couldn't export operator aten::upsample_bilinear2d.
 
@@ -195,7 +195,7 @@ Solution: net = UNet(n_channels=3, n_classes=1, bilinear=False).to(device).
 
 ## DeepLabV3 (Semantic Segmentation)
 
-### Pruning Issues
+### Pruning
 
 1. Pruning the output layer of the network causes inconsistent output categories for semantic segmentation tasks.
 
@@ -579,7 +579,7 @@ pred1_s2 = pred1_s2[:, 0, :, :]
 ![img](../assets/images-bugs/starlight_bugs_20230329115944689.png)
 * Solution: Rewrite an SSD model file, and make two changes. (1) Move the output self.priors out of the forward function of SSD. (2) Put self.priors into the output during the calculation of loss.
 
-### 量化问题记录
+### Quantization
 
 1. Issue: Error occurs when exporting the onnx model during quantization.
 * Reason:
