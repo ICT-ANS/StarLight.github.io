@@ -623,7 +623,7 @@ def forward(self, x):
 
 ### 量化问题记录
 
-1. 导出Onnx之后，生成engine过程，报错：（应该是缺少ScatterND插件）
+1. 导出onnx后，生成engine过程，报错：（应该是缺少ScatterND插件）
 > [TensorRT] ERROR: INVALID_ARGUMENT: getPluginCreator could not find plugin ScatterND version 1
 > ERROR: Fail to parse the ONNX file.
 > In node -1 (importFallbackPluginImporter): UNSUPPORTED_NODE: Assertion failed: creator && "Plugin not found, are the plugin name, version, and namespace correct?"
