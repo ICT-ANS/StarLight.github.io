@@ -213,26 +213,25 @@ The element type in the input tensor is not defined.
 ### 剪枝问题记录
 
 1. 环境安装：ModuleNotFoundError: No module named 'OpenEXR'
-   * 解决：建议使用如下步骤安装该软件包。
-   ```Shell
-      apt-get update
-      apt-get install libopenexr-dev
-      export CFLAGS="-I/Users/USERNAME/homebrew/include/OpenEXR -std=c++11"
-      export LDFLAGS="-L/Users/USERNAME/homebrew/lib"
-      pip install OpenEXR
-   ```
-
-   * 可能出现的问题1：OpenEXR.cpp:36:10: fatal error: 'ImathBox.h' file not found
-      1. 解决：apt-get install libopenexr-dev
-      2. 引用：https://github.com/AcademySoftwareFoundation/openexr/issues/449
-   * 可能出现的问题2：fatal error: 'ImathBox.h' file not found
-      1. 解决：需要按照如下方式设置编译用的std
-      2. 引用：https://github.com/google-research/kubric/issues/19
-   ```Shell
-      export CFLAGS="-I/Users/USERNAME/homebrew/include/OpenEXR -std=c++11"
-      export LDFLAGS="-L/Users/USERNAME/homebrew/lib"
-      pip install OpenEXR
-   ```
+* 解决：建议使用如下步骤安装该软件包。
+  ```shell
+     apt-get update
+     apt-get install libopenexr-dev
+     export CFLAGS="-I/Users/USERNAME/homebrew/include/OpenEXR -std=c++11"
+     export LDFLAGS="-L/Users/USERNAME/homebrew/lib"
+     pip install OpenEXR
+  ```
+* 可能出现的问题1：OpenEXR.cpp:36:10: fatal error: 'ImathBox.h' file not found
+   * 解决：apt-get install libopenexr-dev
+   * 引用：https://github.com/AcademySoftwareFoundation/openexr/issues/449
+* 可能出现的问题2：fatal error: 'ImathBox.h' file not found
+   * 解决：需要按照如下方式设置编译用的std
+   * 引用：https://github.com/google-research/kubric/issues/19
+  ```shell
+     export CFLAGS="-I/Users/USERNAME/homebrew/include/OpenEXR -std=c++11"
+     export LDFLAGS="-L/Users/USERNAME/homebrew/lib"
+     pip install OpenEXR
+  ```
 
 2. 两个输入问题
    * 问题：网络包含两个输入
@@ -266,9 +265,11 @@ The element type in the input tensor is not defined.
      ![img](../assets/images-bugs/starlight_bugs_20230329115937602.png)
   * 解法2测试：
      * 添加可识别上述操作的插件生成，细节请参照"YOLOv5-量化问题记录"。
+
 2. ONNX无法打开：
 * 原因：问题在于网络结构太大，过于复杂。
 * 解决：将网络中出问题的部分单独提取为新网络，即可在ONNX打开。
+
 3. 3D反卷积量化报错
 ![img](../assets/images-bugs/starlight_bugs_20230329115936975.png)
 * 问题：根据错误提示，发现TensorRT还不支持不对称的反卷积。官方回复将在未来支持。
@@ -304,7 +305,6 @@ conv6 = FMish(y + self.redir1(x))
 * 问题：将出错的一段模型结构单独量化后进行可视化如下，发现该问题是由于模型中存在torch.squeeze(x,dim=1)造成的。量化时，需要判断第1维是否为0，如果为0就去掉这一维。
 ![img](../assets/images-bugs/starlight_bugs_20230329115938495.png)
 * 解决：前向传播时可以明确第一维为0因此无需判断，直接使用正常索引即可，代码修改如下
-
 ```python
 pred2_s4 = F.upsample(pred2_s4 * 8, [left.size()[2], left.size()[3]], mode='bilinear', align_corners=True)
 # pred2_s4 = torch.squeeze(pred2_s4, 1) # 报错代码
@@ -317,10 +317,11 @@ pred1_s2 = F.upsample(pred1_s2 * 2, [left.size()[2], left.size()[3]], mode='bili
 pred1_s2 = pred1_s2[:, 0, :, :]
 ```
 
-1. 量化导出时处理ONNX中的Clip结构报错
+5. 量化导出时处理ONNX中的Clip结构报错
 * 问题：Assertion failed: inputs.at(2).is_weights() && "Clip max value must be an initializer!"
 * 解决：经过查询，该问题是由于torch.clamp函数中未设置max参数导致，在所有torch.clamp的位置添加一个max参数即可。
-2. 量化导出时处理ONNX中的torch.gather结构报错
+
+6. 量化导出时处理ONNX中的torch.gather结构报错
 * 使用量化代码导出时出现如下错误：
 ![img](../assets/images-bugs/starlight_bugs_20230329115937732.png)
 * 上述错误未包含明确信息，因此使用trt_infer.py代码进行调试，出现如下报错：
@@ -338,18 +339,19 @@ pred1_s2 = pred1_s2[:, 0, :, :]
 1. Tensor和int数值无法直接相除
 ![img](../assets/images-bugs/starlight_bugs_20230329115939830.png)
 * 解决：该问题可能源于不同Pytorch版本对除法的处理不一致。因此，将所有Tensor转为数值即可。
-   ```python
+```python
       input_size = []
       for _size in input_size_ori:
           if torch.is_tensor(_size):
               input_size.append(_size.item())
           else:
               input_size.append(_size)
-   ```
+```
+
 2. 使用NNI自动剪枝构图报错
 ![img](../assets/images-bugs/starlight_bugs_20230329115938727.png)
 * 解决：调试发现原因在于无法识别自定义的模块MemoryEfficientSwish，该模块是一个激活函数，可以直接跳过。因此，改写tensorboard文件夹下的_pytorch_graph.py文件设置跳过该函数即可。
-  ```python
+```python
      class NodePyOP(NodePy):
          def __init__(self, node_cpp):
              super(NodePyOP, self).__init__(node_cpp, methods_OP)
@@ -362,11 +364,13 @@ pred1_s2 = pred1_s2[:, 0, :, :]
                  # raise ValueError('error')
                  self.attributes = []
                  self.kind = node_cpp.kind()
-  ```
+```
+
 3. 代码卡在_get_parent_layers()中死循环
 * 问题：lib/compression/pytorch/utils/shape_dependency.py中ChannelDependency()的_get_parent_layers()函数
 * 解决：避免遍历已遍历过的节点即可。添加一个travel_list，对于已经遍历过的节点不再遍历。
    ![img](../assets/images-bugs/starlight_bugs_20230329115938983.png)
+
 4. 无法识别自定义的Conv2dStaticSamePadding()模块
 ![img](../assets/images-bugs/starlight_bugs_20230329115938715.png)
 * 问题：无法识别自定义的卷积层Conv2dStaticSamePadding()，导致后续层没有输入。
@@ -431,6 +435,7 @@ pred1_s2 = pred1_s2[:, 0, :, :]
                    x = self.conv(x)
                    return x
            ```
+
 5. 显存不足报错
 * 问题：ModelSpeedup()中confidence默认值为8，即batchsize为8，自动导出模型时会报错，提示显存不足。由于已经使用显存为32G的V100，所以可降低confidence为2。
 ![img](../assets/images-bugs/starlight_bugs_20230329115939082.png)
