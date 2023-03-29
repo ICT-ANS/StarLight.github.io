@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Bug Summary
-nav_order: 8
+nav_order: 9
 ---
 # Bug Summary
 {: .no_toc }
@@ -16,14 +16,15 @@ nav_order: 8
 
 ## ResNet50-SSD (Detection)
 
-### Pruning
+### 剪枝问题记录
 
-1. When using the FPGM method, torch.jit.trace is unable to trace the model.
-* Reason: The model has three outputs as shown below. The third output, self.priors, is a constant and independent of the input, which causes the aforementioned problem.
+1. 使用FPGM方法时，torch.jit.trace无法追踪模型
+* 原因：模型有三个输出，如下。其中第三个输出self.priors为常量，与输入无关，导致上述问题
 ![img](../assets/images-bugs/starlight_bugs_20230329115935476.png)
-* Solution: Rewrite an SSD model file, only need to change two points. (1) Move the output self.priors out of the forward function of SSD. (2) Put self.priors into the output during the calculation of loss.
+* 解决：重写一个SSD模型文件，仅需改变两点。（1）将输出self.priors从SSD的forward函数中移出（2）在计算loss间，将self.priors放入output中
 ![img](../assets/images-bugs/starlight_bugs_20230329115935488.png) ![img](../assets/images-bugs/starlight_bugs_20230329115935446.png)
-2. After exporting the pruned model, an error occurs during inference.
+
+2. 导出剪枝模型后，推理时报错
 ```python
 shape '[32, -1, 4]' is invalid for input of size 915904
 File "/home/yanglongxing/project/Compress_ResNet50_Detection/prune_model.py", line 172, in forward (Current frame)    
@@ -47,17 +48,17 @@ File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.p
 File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 193, in _run_module_as_main    
     "__main__", mod_spec)
 ```
-* Reason: The loc and cls outputs of the model are obtained through convolution, and pruning will cut the convolution of these output layers, causing the output size to become smaller, resulting in an error.
-* To solve the issue of inference error after exporting the pruned model, you need to add op_names to only prune the non-output layer convolutions.
+* 原因：模型输出的loc和cls是通过卷积得到的，而剪枝会剪掉这些输出层的卷积，导致输出尺寸变小，从而报错
+* 解决：添加op_names,仅剪枝非输出层的卷积
 
-3. Slow nms on server
+3. nms在服务器上时间过慢
 ![img](../assets/images-bugs/starlight_bugs_20230329115935418.png)
-* Problem: nms runs on CPU, but the server has too many programs running, causing high CPU load.
-* Solution: Use nms on GPU.
+* 原因：nms是在cpu运行的，而服务器上有太多程序在跑，导致cpu负载过大 
+* 解决：在gpu上使用nms
 ![img](../assets/images-bugs/starlight_bugs_20230329115935429.png)
-* Note: It is not recommended to use GPU nms, as it may cause code errors during forward, including https://www.cnblogs.com/naive-LR/p/14256624.html and https://blog.csdn.net/m0_38007695/article/details/107065617, and the latter's solution is invalid.
+**补充**：**不建议使用gpu的nms**，因为会导致代码在forward的时候出错，包括https://www.cnblogs.com/naive-LR/p/14256624.html和https://blog.csdn.net/m0_38007695/article/details/107065617，后者的解决方案无效。
 
-4. The following error occurs during inference before fine-tuning the pruned model:
+4. 模型剪枝后微调前推理会报如下错误：
 ```python
 Traceback (most recent call last):
   File "prune.py", line 409, in <module>
@@ -74,24 +75,22 @@ Traceback (most recent call last):
     BB = BB[sorted_ind, :]
 IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed
 ```
-* Problem: Poor precision after pruning and before fine-tuning, with empty bounding boxes and an error in the line `BB = BB[sorted_ind, :]` due to the empty list `sorted_ind`.
-
-* Reason: The pruned model is unable to detect objects with poor precision before fine-tuning, causing empty bounding boxes and the error.
-* Solution: Modify two lines in "SSD_Pytorch/data/voc_eval.py" (around line 143 and 193) as shown in the following images:
+* 原因：剪枝后微调前精度很差，模型检测不出物体，bounding box为空，此时BB = BB[sorted_ind, :]中的sorted_ind为空list，导致出错
+* 解决：在SSD_Pytorch/data/voc_eval.py中修改两处（约143行和193行），修改如下
 ![img](../assets/images-bugs/starlight_bugs_20230329115935533.png) ![img](../assets/images-bugs/starlight_bugs_20230329115935583.png)
 
-5. Difficult to restore precision after model pruning.
-* Problem: Before fine-tuning, the optimizer used is the one from before pruning, which optimizes parameters from before pruning instead of the exported pruned model parameters, leading to limited performance improvement during fine-tuning.
-* Solution: Redefine the optimizer before fine-tuning as shown below:
+5. 模型剪枝后精度很难恢复 
+* 原因：模型微调前，使用剪枝前的optimizer，导致优化参数是剪枝前的参数，而非导出剪枝模型后的参数，所以微调效果有限
+* 解决：微调前重新定义optimizer
 ![img](../assets/images-bugs/starlight_bugs_20230329115935609.png)
 
 ### 量化问题记录
 
-1. The inference function in ModelSpeedupTensorRT in the lib package only supports single output, while the detection model has two outputs.
-* Solution: Create a new file called quan_model.py and rewrite the SSD model by adding an inference function that calls the quantized trt model to get the dual output results. The modification is as follows:
-* Add a load_engine function to the SSD model
+1. lib包中的ModelSpeedupTensorRT的inference仅支持单输出，而检测模型是二输出
+* 解决：新建一个quan_model.py，重写SSD模型，修改内容为添加一个inference函数，作用是调用量化的trt模型得到双输出结果。修改如下：
+* SSD模型添加load_engine函数
 ![img](../assets/images-bugs/starlight_bugs_20230329115935595.png)
-* Add the inference(self, x) function to the SSD model. Note: since it needs to convert torch to ONNX, it needs to reference the design of model pruning problem 1.
+* SSD模型添加inference(self, x)，注意：由于要torch转onnx，所以要参考剪枝问题1设计模型
 ```python
 def inference(self, x):
         """
@@ -135,89 +134,83 @@ def inference(self, x):
         result_loc = torch.Tensor(np.concatenate(result_loc))
         return result_cls, result_loc, elapsed_time
 ```
-* Load the engine before inference, and call the inference function during inference.
+* 推理前load_engine，推理中调用inference函数
 ![img](../assets/images-bugs/starlight_bugs_20230329115935609-0062375.png) ![img](../assets/images-bugs/starlight_bugs_20230329115935623.png)
 
-2. When compressing the model, the following error is occurred:
+2. 模型compress时，报如下错误：
 ```python
 TypeError       (note: full exception trace is shown but execution is paused at: <module>)
 The element type in the input tensor is not defined.
   File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/site-packages/onnx/numpy_helper.py", line 37, in to_array    raise TypeError("The element type in the input tensor is not defined.")  File "/home/yanglongxing/project/Compress_ResNet50_Detection/lib/compression/pytorch/quantization_speedup/frontend_to_onnx.py", line 82, in unwrapper    index = int(onnx.numpy_helper.to_array(const_nd.attribute[0].t))  File "/home/yanglongxing/project/Compress_ResNet50_Detection/lib/compression/pytorch/quantization_speedup/frontend_to_onnx.py", line 144, in torch_to_onnx    model_onnx, onnx_config = unwrapper(model_onnx, index2name, config)  File "/home/yanglongxing/project/Compress_ResNet50_Detection/lib/compression/pytorch/quantization_speedup/integrated_tensorrt.py", line 303, in compress    _, self.onnx_config = fonnx.torch_to_onnx(self.model, self.config, input_shape=self.input_shape, model_path=self.onnx_path, input_names=self.input_names, output_names=self.output_names)  File "/home/yanglongxing/project/Compress_ResNet50_Detection/quan.py", line 229, in main    engine.compress()  File "/home/yanglongxing/project/Compress_ResNet50_Detection/quan.py", line 241, in <module> (Current frame)    main()  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 85, in _run_code    exec(code, run_globals)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 96, in _run_module_code    mod_name, mod_spec, pkg_name, script_name)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 263, in run_path    pkg_name=pkg_name, script_name=fname)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 85, in _run_code    exec(code, run_globals)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 193, in _run_module_as_main    "__main__", mod_spec)
 ```
-* Solution: Comment out the `torch.onnx.torch_to_onnx` line and directly export the onnx model using `torch.onnx.export`.
+* 解决：注释*fonnx.torch_to_onnx，*直接用torch导出onnx模型。
 ![img](../assets/images-bugs/starlight_bugs_20230329115936123.png)
 
-3. The compressed model runs slower than the original model after quantization.
-Reason: The quantization time includes the time to move data from CPU to GPU and from GPU to CPU, which slows down the inference speed.
-Solution: Only calculate the GPU inference time and remove the aforementioned two time blocks. Specifically, add the following function to the SSD class in quan_model.py, and the returned infer_time is the inference time.
+3. 模型量化后速度比不量化前慢
+* 原因：量化时间把数据从cpu->gpu和从gpu->cpu的时间算上了，所以变慢
+* 解决：只计算gpu推理时间，去掉上述两块时间。具体方法是在quan_model.py中的SSD类中添加如下函数，返回的infer_time即为推理时间。
 ![img](../assets/images-bugs/starlight_bugs_20230329115935796-0062375.png)
 
 ## UNet (Drivable Space)
 
 ### 剪枝问题记录
 
-1. Error occurred when exporting pruning code: Given groups=1, weight of size [64, 128, 3, 3], expected input[8, 64, 150, 150] to have 128 channels, but got 64 channels instead.
-Cause: In the Up layer of UNet, nn.ConvTranspose2d is followed by Pad and cat operations. NNI cannot parse the combination of nn.ConvTranspose2d + Pad + Cat operations correctly, causing InferMask to parse the output size of Cat as [8, 64, 150, 150], while the correct size should be [8, 128, 150, 150].
-Solution: After analysis, it is found that Pad is an invalid operation because its padding size is 0. Removing the Pad operation enables NNI to parse it correctly.
-2. The new model's Pad operation cannot be removed, so a new solution is needed.
-Cause: NNI needs to obtain the input of the node when parsing PyTorch nodes. For the *F.pad(x1, (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2)) operation, the second item of the input (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2) is not a Tensor, aten::, prim::ListUnpack, or prim::TupleUnpack, so it cannot be parsed successfully, resulting in only x1 as the input of the pad node and NNI export failure.
-Solution: Do not provide the second item input in the forward function, but create a new Pad class and initialize the second item in the init.
+1. 导出剪枝代码时报错：Given groups=1, weight of size [64, 128, 3, 3], expected input[8, 64, 150, 150] to have 128 channels, but got 64 channels instead
+* 原因：在UNet的Up layer中，nn.ConvTranspose2d后使用了Pad和cat操作，NNI不能够正确解析nn.ConvTranspose2d + Pad + Cat操作的组合，导致InferMask时将Cat的输出尺寸解析成[8, 64, 150, 150]，而正确的为[8, 128, 150, 150]
+* 解决：经过分析发现，Pad为无效操作，因为其Pad的尺寸为0。将Pad操作删除后，NNI便可正确解析。
+
+2. 新模型的Pad操作不能去掉，所以需要提供新的解决方法。
+* 原因：nni在解析Pytorch节点时，需要获取节点的输入，而对于*F.pad(x1, (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2))操作，第二项输入(diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2)非Tensor，aten::，prim::ListUnpack，prim::TupleUnpack，所以不能被成功解析，导致pad节点的输入只有x1，导致nni导出失败。*
+* 解决：不在forward函数中提供第二项输入，而是新建一个Pad类并在init中初始化第二项
 ![img](../assets/images-bugs/starlight_bugs_20230329115935951.png)
-* Also, add support for this module in lib/compression/pytorch/speedup/compress_modules.py.
+* 同时，需要在lib/compression/pytorch/speedup/compress_modules.py中添加对该Module的支持。
 ![img](../assets/images-bugs/starlight_bugs_20230329115935796.png)
-* In practice, the training and inference resolutions are different, and the Pad size is also different. Therefore, add the following function to the model and provide the resolution before training or inference.
+ 实践中，训练和推理分辨率不同，Pad的尺寸也不同，需要在model中添加如下函数，并在训练或/推理前提供分辨率
 ![img](../assets/images-bugs/starlight_bugs_20230329115935916.png)
 ![img](../assets/images-bugs/starlight_bugs_20230329115935920.png)
 
-### Quantization
+### 量化问题记录
 
-1. Error occurred when loading the quantized model for inference: [TensorRT] ERROR: ../rtSafe/safeContext.cpp (133) - Cudnn Error in configure: 7 (CUDNN_STATUS_MAPPING_ERROR).
-Cause: The net was not put on cuda when initializing ModelSpeedupTensorRT.
-Solution: net = UNet(n_channels=3, n_classes=1, bilinear=False).to(device).
+1. 加载量化模型推理时报[TensorRT] ERROR: ../rtSafe/safeContext.cpp (133) - Cudnn Error in configure: 7 (CUDNN_STATUS_MAPPING_ERROR)
+* 原因：初始化ModelSpeedupTensorRT是的net没有放到cuda上
+* 解决：net = UNet(n_channels=3, n_classes=1, bilinear=False)**.to(device)**
 
 ## PSPNet (Semantic Segmentation)
 
-### Pruning Issues
+### 剪枝问题记录
 
-1. For the down-sampling layer, the residual has convolutional layers, and the channel addition between the pruned residual and the pruned main branch does not correspond.
+1. 下采样层，由于residule带有卷积，residual剪枝后和主分支剪枝后的通道相加不对应
+* 解决：设定residule卷积输出通道与该block最后一个卷积输出通道的被剪枝index相同
+2. 微调时，模型测试时间太长
+* 解决：仅使用10张图片进行模型测试，判断停止点
 
-- Solution: Set the output channels of the residual convolutional layer to be the same as the pruned index of the last convolutional layer in the block.
+### 量化问题记录
 
-1. During fine-tuning, the model testing time is too long.
-
-- Solution: Use only 10 images for model testing and determine the stopping point.
-
-### Quantization Issues
-
-1. When exporting the model, RuntimeError: ONNX export failed: Couldn't export operator aten::upsample_bilinear2d.
-
-- Solution: Add a parameter "opset_version=11" at the end of the torch.onnx.export() parameter list.
+1. 导出模型时， RuntimeError: ONNX export failed: Couldn't export operator aten::upsample_bilinear2d
+* 解决：在torch.onnx.export()参数列表末尾添加一个参数  “opset_version=11”
 
 ## DeepLabV3 (Semantic Segmentation)
 
-### Pruning Issues
+### 剪枝问题记录
 
-1. Pruning the output layer of the network causes inconsistent output categories for semantic segmentation tasks.
+1. 网络最后的输出层被剪枝，导致语义分割任务的输出类别不一致
+* 原因：使用自动导出的方法容易存在该问题，无法自动处理
+* 解决：使用手动剪枝
 
-- Reason: Using the automatically generated method can easily lead to this problem, which cannot be automatically handled.
-- Solution: Use manual pruning.
+2. 残差块的第一个带下采样的层，通道无法对齐
+* 原因：由于in_place_dict中结构顺序撰写错误导致
+* 解决：修正每个残差块的第一个下采样层的输入为残差支路的x而不是带卷积支路的x
 
-2. The channel cannot be aligned for the first downsampling layer of the residual block.
-
-- Reason: The structure order in the in_place_dict is written incorrectly.
-- Solution: Correct the input of the first downsampling layer of each residual block to be the residual branch's x, rather than the convolutional branch's x.
-
-3. The channels cannot be aligned for the ASPP module.
-
-- Reason: The pyramid structure consists of 5 parallel branches, each of which takes the external input of the entire pyramid. Due to the incorrect definition of the internal connections in the in_place_dict, an error is reported.
-- Solution: Correct the input of the 5 branches to be the same external input x.
+3. ASPP通道无法对齐
+* 原因：金字塔结构是并联的5个分支，每个分支的输入均为金字塔整体的外部输入，由于in_place_dict中将金字塔内部的连接关系定义错误，因此导致报错
+* 解决：修正5个分支的输入均为同一个外部输入x
 
 ## CFNet (Depth Prediction)
 
-### Pruning
+### 剪枝问题记录
 
-1. Environment installation: ModuleNotFoundError: No module named 'OpenEXR'
-- Solution: It is recommended to install this software package using the following steps.
+1. 环境安装：ModuleNotFoundError: No module named 'OpenEXR'
+* 解决：建议使用如下步骤安装该软件包。
   ```shell
      apt-get update
      apt-get install libopenexr-dev
@@ -225,65 +218,65 @@ Solution: net = UNet(n_channels=3, n_classes=1, bilinear=False).to(device).
      export LDFLAGS="-L/Users/USERNAME/homebrew/lib"
      pip install OpenEXR
   ```
-- Possible issue 1: OpenEXR.cpp:36:10: fatal error: 'ImathBox.h' file not found
-- Solution: apt-get install libopenexr-dev
-- Reference: https://github.com/AcademySoftwareFoundation/openexr/issues/449
-- Possible issue 2: fatal error: 'ImathBox.h' file not found
-- Solution: Set the std for compiling in the following way.
-- Reference: https://github.com/google-research/kubric/issues/19
+* 可能出现的问题1：OpenEXR.cpp:36:10: fatal error: 'ImathBox.h' file not found
+* 解决：apt-get install libopenexr-dev
+* 引用：https://github.com/AcademySoftwareFoundation/openexr/issues/449
+* 可能出现的问题2：fatal error: 'ImathBox.h' file not found
+* 解决：需要按照如下方式设置编译用的std
+* 引用：https://github.com/google-research/kubric/issues/19
 ```shell
     export CFLAGS="-I/Users/USERNAME/homebrew/include/OpenEXR -std=c++11"
     export LDFLAGS="-L/Users/USERNAME/homebrew/lib"
     pip install OpenEXR
 ```
 
-2. Two-input problem
-- Issue: The network contains two inputs.
-- Solution: Set the input parameter dummy_input of the Pruner, such as FPGMPruner, to a tuple (rand_inputs1, rand_inputs2).
+2. 两个输入问题
+* 问题：网络包含两个输入
+* 解决：将剪枝器（Pruner）如FPGMPruner的输入参数dummy_input改为元组(rand_inputs1, rand_inputs2)
 
-3. Check view dimension inconsistency error
-- Issue: There is only one dimension in the input of a node.
-- Solution: Add a dimension number check.
+3. 检查view维度不一致报错
+* 问题：一个节点的输入只有一个维度
+* 解决：加入维度数量判断
 ![img](../assets/images-bugs/starlight_bugs_20230329115936623.png)
 
-4. Error of Update_mask() function due to inconsistent dimensions.
+4. Update_mask()函数维度不一致报错
 ![img](../assets/images-bugs/starlight_bugs_20230329115936736.png)
-* Solution: When constructing the graph, NNI misjudged the predecessors and successors of two convolutions. Obtain the names of these two convolutions in the network in advance and skip pruning algorithms for these two convolutions during pruning.
+* 解决：nni在构图时，其中两个卷积的前驱与后继判断错误。提前获取这两个卷积在网络中的名称，剪枝时设定剪枝算法跳过这两个卷积，不对它们进行剪枝即可。
 
-5. Model size is too large, and a single card cannot handle it during pruning.
-* Solution: During debugging of pruning, use a very small input size first; after confirming that pruning can proceed normally, set the BatchSize to the minimum value for pruning.
+5. 模型尺寸过大，剪枝时单张卡放不下
+* 解决：Debug剪枝时，先使用特别小的输入尺寸；确认剪枝可正常进行后，设定BatchSize为最小值，进行剪枝。
 
-6. After pruning the model, the subsequent 3D convolutions were not pruned, causing the output of the last layer of the pruned part of the model to be inconsistent with the input of the subsequent unpruned part. 
+6. 模型剪枝完成，但后续的3D卷积没有剪枝，导致模型剪枝部分的最后一层输出与后续未剪枝部分的输入不匹配
 ![img](../assets/images-bugs/starlight_bugs_20230329115938611.png)
-* Solution: Do not prune any output channels of the last convolution in the pruned part.
+* 解决：剪枝部分的最后一个卷积的输出通道全都不剪
 
-### Quantization
+### 量化问题记录
 
-1. Node identification failed, and the ONNX model generated at this time cannot be opened with Netron. 
+1. 节点无法识别，而且此时生成的ONNX模型无法用Netron打开
    ![img](../assets/images-bugs/starlight_bugs_20230329115937057.png)
-* Solution: The problem is caused by the use of tensor slicing in forward propagation. Therefore, there are two solutions: Solution 1: Remove the slicing operation in forward propagation; Solution 2: Add the slicing operation plugin.
-- Solution 1 Test:
-  - Since in the forward propagation, the model repeats the same module twice, so in pruning, the two calls are combined and the result is sliced. Since this slicing operation has a problem during quantization, here the forward propagation is adjusted back to the original mode for testing, that is, two repeated calls without slicing.
-  - Result: It was found that the same problem occurred, it seems that this problem cannot be bypassed. Because there are a lot of slicing operations in other functions in the network. 
+* 解决记录：查到这个问题是由于前向传播中用到Tensor切片导致的。因此有两种解决方案：解法1：去掉前向传播中的切片操作；解法2：加入切片操作的插件
+  * 解法1测试：
+     * 由于在前向传播中，这个模型对相同的模块进行了两次重复调用，所以在剪枝时将两次调用合并，对结果进行切片。由于该切片操作在量化时出现问题，因此这里还是将前向传播调整回原始模式进行测试，即两次重复调用，不进行切片。
+     * 结果：发现会出现同样的问题，看来这个问题无法绕开。因为在网络中的其它函数里，出现了大量的切片操作。
      ![img](../assets/images-bugs/starlight_bugs_20230329115936342.png)![img](../assets/images-bugs/starlight_bugs_20230329115936737.png)
      ![img](../assets/images-bugs/starlight_bugs_20230329115937602.png)
-  * Solution 2 Test:
-    - Add a plugin that recognizes the above operations and generate, please refer to "YOLOv5-Quantization Issue Log" for details.
+  * 解法2测试：
+     * 添加可识别上述操作的插件生成，细节请参照"YOLOv5-量化问题记录"。
 
-2. ONNX cannot be opened:
-- Cause: The problem lies in the fact that the network structure is too large and too complicated.
-- Solution: Extract the problematic part of the network separately as a new network, and it can be opened in ONNX.
+2. ONNX无法打开：
+* 原因：问题在于网络结构太大，过于复杂。
+* 解决：将网络中出问题的部分单独提取为新网络，即可在ONNX打开。
 
-3. Quantization error of 3D deconvolution。
+3. 3D反卷积量化报错
 ![img](../assets/images-bugs/starlight_bugs_20230329115936975.png)
-* Problem: According to the error prompt, it was found that TensorRT does not yet support asymmetric deconvolution. The official reply will support it in the future.
+* 问题：根据错误提示，发现TensorRT还不支持不对称的反卷积。官方回复将在未来支持。
 ![img](../assets/images-bugs/starlight_bugs_20230329115937398.png)
-* Solution: The above problem is mainly caused by output_padding=1 in 3D deconvolution, so after setting it to 0, manually pad the output result with 0, and modify the forward propagation code as follows:
+* 解决：上述问题主要由于3d deconv中的output_padding=1导致，因此将其设为0后，手动对输出结果进行补0即可，前向传播代码修改如下：
 ```python
-# code with bugs
+# 报错代码
 # conv5 = F.relu(self.conv5(conv4) + self.redir2(conv2), inplace=True)
 # conv6 = F.relu(self.conv6(conv5) + self.redir1(x), inplace=True)
-# code without bugs
+# 正确代码
 y = self.conv5(conv4)
 y_pad = torch.zeros_like(y)
 y = torch.cat((y, y_pad[:, :, 0, :, :].unsqueeze(dim=2)), dim=2)
@@ -304,11 +297,11 @@ y = self.conv6bn(y)
 conv6 = FMish(y + self.redir1(x))
 ```
 
-4. Quantization export error when dealing with the IF structure in ONNX
+4. 量化导出时处理ONNX中的IF结构报错
 ![img](../assets/images-bugs/starlight_bugs_20230329115937953.png)
-* Problem: After visualizing a problematic segment of the model structure that was quantized individually, it was found that the issue was caused by the `torch.squeeze(x,dim=1)` operation. During quantization, it is necessary to check whether the first dimension is 0, and if so, remove this dimension.
+* 问题：将出错的一段模型结构单独量化后进行可视化如下，发现该问题是由于模型中存在torch.squeeze(x,dim=1)造成的。量化时，需要判断第1维是否为0，如果为0就去掉这一维。
 ![img](../assets/images-bugs/starlight_bugs_20230329115938495.png)
-* Solution: During forward propagation, it is clear that the first dimension is 0, so no checking is needed. We can use normal indexing directly. The modified code is as follows:
+* 解决：前向传播时可以明确第一维为0因此无需判断，直接使用正常索引即可，代码修改如下
 ```python
 pred2_s4 = F.upsample(pred2_s4 * 8, [left.size()[2], left.size()[3]], mode='bilinear', align_corners=True)
 # pred2_s4 = torch.squeeze(pred2_s4, 1) # 报错代码
@@ -321,29 +314,28 @@ pred1_s2 = F.upsample(pred1_s2 * 2, [left.size()[2], left.size()[3]], mode='bili
 pred1_s2 = pred1_s2[:, 0, :, :]
 ```
 
-5. Error occurred when processing Clip structure in ONNX during quantization export.
+5. 量化导出时处理ONNX中的Clip结构报错
+* 问题：Assertion failed: inputs.at(2).is_weights() && "Clip max value must be an initializer!"
+* 解决：经过查询，该问题是由于torch.clamp函数中未设置max参数导致，在所有torch.clamp的位置添加一个max参数即可。
 
-- Problem: Assertion failed: inputs.at(2).is_weights() && "Clip max value must be an initializer!"
-- Solution: After investigation, it was found that this problem was caused by the lack of setting the max parameter in the torch.clamp function. Adding a max parameter in all torch.clamp positions can solve this problem.
-
-6. Error occurred when processing torch.gather structure in ONNX during quantization export.
-- Error occurred during quantization code export as shown below:
+6. 量化导出时处理ONNX中的torch.gather结构报错
+* 使用量化代码导出时出现如下错误：
 ![img](../assets/images-bugs/starlight_bugs_20230329115937732.png)
-* The above error does not provide clear information. Therefore, trt_infer.py code was used for debugging, and the following error occurred:
+* 上述错误未包含明确信息，因此使用trt_infer.py代码进行调试，出现如下报错：
 ![img](../assets/images-bugs/starlight_bugs_20230329115938105.png)
-* According to the above error, it can be inferred that the error is due to the lack of support for 'GatherElements'. After torch.gather function is exported to ONNX, it will form a GatherElements node. However, our TensorRT version 7.1.3.4 does not support processing this node.
+* 根据上述错误可知，是缺少处理'GatherElements'的支持。因为torch.gather函数在导出为ONNX后，会形成GatherElements节点，而我们使用的7.1.3.4版本TensorRT不支持处理该节点。
 ![img](../assets/images-bugs/starlight_bugs_20230329115940277.png)
-* After investigation, it was found that TensorRT8.0 supports the GatherElements operation in the form of built-in functions instead of plugins. However, the built-in functions are closed source and cannot be directly referred to. 
-* Solution: To work around the above problem, the model is divided into two parts. The first half is quantized, and the second half uses the original model directly. During testing, the output of the first half is converted to Tensor and directly fed into the second half. Alternatively, a quantizable operation can be used to replace the unquantizable operation.
+* 经过查询发现：TensorRT8.0支持GatherElements操作，以内置函数的方式提供，而不是插件，内置函数是闭源的，所以没有能直接参考的。
+* 解决：为了绕开上述问题，将模型分成两段。前半段进行量化，后半段直接使用原始模型。测试时，将第一段的输出转为Tensor后直接送入第二段即可。或者，寻找一种可量化的操作替换该不可量化操作。
 ![img](../assets/images-bugs/starlight_bugs_20230329115938401.png)
 
 ## EfficientNet-B3 (Semantic Segmentation)
 
-### Pruning
+### 剪枝问题记录
 
-1. Cannot directly divide Tensor and int values.
+1. Tensor和int数值无法直接相除
 ![img](../assets/images-bugs/starlight_bugs_20230329115939830.png)
-* Solution: This problem may be caused by inconsistent treatment of division in different versions of Pytorch. Therefore, converting all Tensors to values can solve this problem.
+* 解决：该问题可能源于不同Pytorch版本对除法的处理不一致。因此，将所有Tensor转为数值即可。
 ```python
       input_size = []
       for _size in input_size_ori:
@@ -353,9 +345,9 @@ pred1_s2 = pred1_s2[:, 0, :, :]
               input_size.append(_size)
 ```
 
-2. Using NNI to automatically construct pruning graph error:
+2. 使用NNI自动剪枝构图报错
 ![img](../assets/images-bugs/starlight_bugs_20230329115938727.png)
-* Solution: Debugging found that the reason is that the custom module "MemoryEfficientSwish" cannot be recognized. This module is an activation function and can be skipped directly. Therefore, modifying the `_pytorch_graph.py` file in the `tensorboard` folder to skip this function can solve the problem.
+* 解决：调试发现原因在于无法识别自定义的模块MemoryEfficientSwish，该模块是一个激活函数，可以直接跳过。因此，改写tensorboard文件夹下的_pytorch_graph.py文件设置跳过该函数即可。
 ```python
      class NodePyOP(NodePy):
          def __init__(self, node_cpp):
@@ -371,19 +363,19 @@ pred1_s2 = pred1_s2[:, 0, :, :]
                  self.kind = node_cpp.kind()
 ```
 
-3. Code stuck in an infinite loop in _get_parent_layers().
-* Issue: The _get_parent_layers() function in ChannelDependency() of lib/compression/pytorch/utils/shape_dependency.py.
-* Solution: Avoid traversing nodes that have already been traversed. Add a travel_list, and do not traverse nodes that have already been traversed.
+3. 代码卡在_get_parent_layers()中死循环
+* 问题：lib/compression/pytorch/utils/shape_dependency.py中ChannelDependency()的_get_parent_layers()函数
+* 解决：避免遍历已遍历过的节点即可。添加一个travel_list，对于已经遍历过的节点不再遍历。
    ![img](../assets/images-bugs/starlight_bugs_20230329115938983.png)
 
-4. Unable to recognize the custom module Conv2dStaticSamePadding().
+4. 无法识别自定义的Conv2dStaticSamePadding()模块
 ![img](../assets/images-bugs/starlight_bugs_20230329115938715.png)
-- Issue: Unable to recognize the custom convolutional layer Conv2dStaticSamePadding(), resulting in missing inputs for subsequent layers.
-- Solution: Test the following two solutions, and adopt the second one after testing:
-  - Add the unrecognized operation function in lib/compression/pytorch/speedup/jit_translate.py. However, for the convolution function F.conv2d(), many parameters need to be input, but the parameters are not passed when recognized. Therefore, this solution is not recommended;
-  - Modify the Conv2dStaticSamePadding() module that cannot be recognized to a recognizable form. That is, the original Conv2dStaticSamePadding() inherited nn.Conv2d, and changing it to nn.Module would work. Then, check the places that need to be modified in the definition. This solution is recommended.
-  - Code comparison between the original code and the modified code using solution 2 is shown below:
-    - Original code, unable to recognize the following modules during pruning:
+* 问题：无法识别自定义的卷积层Conv2dStaticSamePadding()，导致后续层没有输入。
+* 解决：测试如下两种解决方案，测试后采用第二种：
+  * 在lib/compression/pytorch/speedup/jit_translate.py中添加无法识别的操作函数。但对于卷积函数F.conv2d()，需要输入很多形参，而在识别时形参并没有传过来。因此，不推荐该方案；
+  * 将无法识别的Conv2dStaticSamePadding()模块改成可以识别的情况。即原始的Conv2dStaticSamePadding()是继承了nn.Conv2d，将其改为nn.Module即可，然后检查定义中需要修改的地方。推荐使用此方案。
+  * 使用方案2修改后的代码对比如下所示：
+     * 原始代码，剪枝时无法识别以下模块：
         ```python
            class Conv2dStaticSamePadding(nn.Conv2d):
                """2D Convolutions like TensorFlow's 'SAME' mode, with the given input image size.
@@ -441,14 +433,13 @@ pred1_s2 = pred1_s2[:, 0, :, :]
                    return x
            ```
 
-5. Out of memory error.
-* Issue:"out of memory" error when using ModelSpeedup() due to the default value of confidence parameter (8) which results in a batch size of 8 during automatic model export.
-* Solution: Lower the confidence parameter to 2 to reduce the batch size and avoid the "out of memory" error.
+5. 显存不足报错
+* 问题：ModelSpeedup()中confidence默认值为8，即batchsize为8，自动导出模型时会报错，提示显存不足。由于已经使用显存为32G的V100，所以可降低confidence为2。
 ![img](../assets/images-bugs/starlight_bugs_20230329115939082.png)
 
-### Quantization
+### 量化问题记录
 
-1. F.interpolate exported as ONNX results in parsing errors. During export, opset_version=11 was used, and below are the error messages for different definition methods：
+1. F.interpolate导出为ONNX后，解析报错。在导出时，使用opset_version=11，以下为各种不同的定义方式下的报错信息：
 * x = F.interpolate(x, size=(int(math.ceil(input_size[-2] / 4)), int(math.ceil(input_size[-1] / 4))), mode='bilinear', align_corners=True)
 ![img](../assets/images-bugs/starlight_bugs_20230329115939171.png)
 * x = F.interpolate(x, size=(int(math.ceil(input_size[-2] / 4)), int(math.ceil(input_size[-1] / 4))), mode='bilinear', align_corners=False)
@@ -461,7 +452,7 @@ pred1_s2 = pred1_s2[:, 0, :, :]
 ![img](../assets/images-bugs/starlight_bugs_20230329115940196.png)
 
 2. pycuda._driver.LogicError: cuMemcpyHtoDAsync failed: invalid argument
-* Issue: This error was caused by the inconsistency between the input_shape set in ModelSpeedupTensorRT initialization and the inference time.
+* 问题：该错误由于初始化ModelSpeedupTensorRT设置的input_shape和推理时不一致所导致。
 ```python
    engine = ModelSpeedupTensorRT(
       model,
@@ -474,12 +465,12 @@ pred1_s2 = pred1_s2[:, 0, :, :]
       extra_layer_bit=extra_layer_bit,
    )
 ```
-* Solution: Keep the training and inference data dimensions consistent.
+* 解决：保持训练和推理数据尺寸一致
 
-3. Check the output of the model before and after quantization - the left image shows the output before quantization, while the right image shows the output after quantization, and there is a significant difference between the two.
+3. 检查量化前后模型的输出——左图量化前，右图量化后，存在较大差异
 ![img](../assets/images-bugs/starlight_bugs_20230329115939754.png)
-- Cause: When decoupling the string in EfficientNet, it will be converted to a list.
-- Solution: Remove the square brackets.
+* 原因: EfficientNet在解耦字符串时，会将其转换为list
+* 解决：去掉方括号即可。
 ![img](../assets/images-bugs/starlight_bugs_20230329115940821.png)
 
 ## HSMNet (Location)
