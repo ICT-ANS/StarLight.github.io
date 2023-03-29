@@ -1,9 +1,9 @@
 ---
 layout: default
-title: Bug Summary
+title: Bug Summary (EN)
 nav_order: 8
 ---
-# Bug Summary
+# Bug Summary in English
 {: .no_toc }
 
 ## Table of contents
