@@ -14,7 +14,7 @@ nav_order: 8
 
 ---
 
-## ResNet50-SSD (Detection)
+## ResNet50-SSD (Object Detection)
 
 ### Pruning
 
@@ -151,28 +151,120 @@ The element type in the input tensor is not defined.
 * Solution: Only calculate the GPU inference time and remove the aforementioned two time blocks. Specifically, add the following function to the SSD class in quan_model.py, and the returned infer_time is the inference time.
 ![img](../assets/images-bugs/starlight_bugs_20230329115935796-0062375.png)
 
-## UNet (Drivable Space)
+## FasterRCNN（Object Detection）
+
+* Due to conflicts between the tcb environment and Starlight, there are conflicts between some of the source code of mmdet1 and Starlight after migrating to a new environment. Therefore, we attempted to use Starlight pruning under the mmdetection2 framework.
 
 ### Pruning
 
-1. Error occurred when exporting pruning code: Given groups=1, weight of size [64, 128, 3, 3], expected input[8, 64, 150, 150] to have 128 channels, but got 64 channels instead.
-Cause: In the Up layer of UNet, nn.ConvTranspose2d is followed by Pad and cat operations. NNI cannot parse the combination of nn.ConvTranspose2d + Pad + Cat operations correctly, causing InferMask to parse the output size of Cat as [8, 64, 150, 150], while the correct size should be [8, 128, 150, 150].
-* Solution: After analysis, it is found that Pad is an invalid operation because its padding size is 0. Removing the Pad operation enables NNI to parse it correctly.
-2. The new model's Pad operation cannot be removed, so a new solution is needed.
-Cause: NNI needs to obtain the input of the node when parsing PyTorch nodes. For the *F.pad(x1, (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2)) operation, the second item of the input (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2) is not a Tensor, aten::, prim::ListUnpack, or prim::TupleUnpack, so it cannot be parsed successfully, resulting in only x1 as the input of the pad node and NNI export failure.
-* Solution: Do not provide the second item input in the forward function, but create a new Pad class and initialize the second item in the init.
-![img](../assets/images-bugs/starlight_bugs_20230329115935951.png)
-* Also, add support for this module in lib/compression/pytorch/speedup/compress_modules.py.
-![img](../assets/images-bugs/starlight_bugs_20230329115935796.png)
-* In practice, the training and inference resolutions are different, and the Pad size is also different. Therefore, add the following function to the model and provide the resolution before training or inference.
-![img](../assets/images-bugs/starlight_bugs_20230329115935916.png)
-![img](../assets/images-bugs/starlight_bugs_20230329115935920.png)
+1. Error occurs when inputting, requiring additional input of img_meta.
+* Problem: The forward() function in mmdetection2 by default calls the forward function in the training stage, which requires additional data information to be input; whereas the pruner only inputs one tensor.
+* Solution: Set forward_dummy() to the default way in mmdet/models/detectors/base.py. 
+![img](../assets/images-bugs/starlight_bugs_20230329115944204.png)
+
+2. After pruning, when loading weights again, the model parameter name does not match the weight file.
+* Problem: When the Prunner prunes the model, it encapsulates the model, and the format of the pruned model object is different from that before pruning.
+* Solution: **Be sure to initialize a new model instance** before loading weights.
+
+### Quantization
+1. Error: from lib.compression.pytorch.utils.counter import count_flops_params.
+![img](../assets/images-bugs/starlight_bugs_20230329115944513.png)
+
+2. Missing prettytable.
+* Solution: Install it using pip.
+
+## VGG-SSD (Object Detection)
+
+### Pruning
+
+1. When using the FPGM method, torch.jit.trace cannot trace the model and reports an error as follows:
+![img](../assets/images-bugs/starlight_bugs_20230329115944541.png)
+* Problem: The model has three outputs as shown below. The third output, self.priors, is a constant that is independent of the input, leading to the above issue. 
+![img](../assets/images-bugs/starlight_bugs_20230329115944689.png)
+* Solution: Rewrite an SSD model file, and make two changes. (1) Move the output self.priors out of the forward function of SSD. (2) Put self.priors into the output during the calculation of loss.
 
 ### Quantization
 
-1. Error occurred when loading the quantized model for inference: [TensorRT] ERROR: ../rtSafe/safeContext.cpp (133) - Cudnn Error in configure: 7 (CUDNN_STATUS_MAPPING_ERROR).
-Cause: The net was not put on cuda when initializing ModelSpeedupTensorRT.
-* Solution: net = UNet(n_channels=3, n_classes=1, bilinear=False).to(device).
+1. Error occurs when exporting the onnx model during quantization.
+* Problem:
+![img](../assets/images-bugs/starlight_bugs_20230329115945106.png)
+* Solution: Use torch.onnx.export() directly.
+
+## YOLOv5 (Object Detection)
+
+### Pruning
+
+1. Here, the cat operation should concatenate two tensors, the current layer and a previous layer in the network. The error is because x is just a tensor, so it concatenates itself. 
+![img](../assets/images-bugs/starlight_bugs_20230329115944991.png)
+* Solution：
+```python
+def forward(self, x): 
+    return torch.cat(tuple(x,), self.d)
+```
+
+2. Error occurs.
+![img](../assets/images-bugs/starlight_bugs_20230329115945301.png)
+![img](../assets/images-bugs/starlight_bugs_20230329115945637.png)
+* The specific location of the above error cannot be identified. Later, through step-by-step debugging, it was located at the following if statement during forward propagation. 
+![img](../assets/images-bugs/starlight_bugs_20230329115945661.png)
+* The error is as follows.
+![img](../assets/images-bugs/starlight_bugs_20230329115945709.png)
+* A similar error was found online at https://stackoverflow.com/questions/66746307/torch-jit-trace-tracerwarning-converting-a-tensor-to-a-python-boolean-might-c
+* Solution: Do not have uncertain judgment statements such as if or for during forward propagation. Since the if statement was true every time during debugging, the if statement was removed and the statements under the if condition were executed directly. 
+![img](../assets/images-bugs/starlight_bugs_20230329115945581.png)
+
+3. Error
+![img](../assets/images-bugs/starlight_bugs_20230329115945996.png)
+* Problem: dummy_input is empty. Later, through step-by-step debugging, it was found that model.42.aten::select.291 had no input, as shown in the figure below. 
+![img](../assets/images-bugs/starlight_bugs_20230329115945995.png)
+* In addition, during forward propagation, the following two lines, self.stride and self.anchor_grid, are not defined. This problem did not occur in the original model inference, because the weights loaded in the original model inference contained these two variables, while the jit.trace process after compression could not find these two variables.
+![img](../assets/images-bugs/starlight_bugs_20230329115946130.png)
+* Solution: Add the following lines to assign values to these two variables.
+![img](../assets/images-bugs/starlight_bugs_20230329115946290.png)
+
+### Quantization
+
+1. After exporting onnx, during the engine generation process, an error occurred: (probably missing the ScatterND plugin)
+> [TensorRT] ERROR: INVALID_ARGUMENT: getPluginCreator could not find plugin ScatterND version 1
+> ERROR: Fail to parse the ONNX file.
+> In node -1 (importFallbackPluginImporter): UNSUPPORTED_NODE: Assertion failed: creator && "Plugin not found, are the plugin name, version, and namespace correct?"
+* Solution: https://blog.csdn.net/HW140701/article/details/120377483
+  * Successfully compiled the ScatterND.so file. Then, add two lines of code in the following file using the ModelSpeedupTensorRT method to specify the path of the plugin.so file.
+  ![img](../assets/images-bugs/starlight_bugs_20230329115946915.png)
+  * Also, when loading the quantized model with engine.load_quantized_model(trt_path), specify the plugin.so file.
+  ![img](../assets/images-bugs/starlight_bugs_20230329115946272.png)
+
+
+## PMR-CNN（Few-shot Object Detection）
+
+### Pruning
+
+1. Input format issue.
+* Problem: PMR-CNN is designed based on the detectron2 framework, which requires inputs in dictionary format, while the input format required by the pruner is tensor.
+* Solution: Enter the inference module and write other key values in the dictionary as fixed values. Use the 'image' part as dummy_input and only input tensor.
+![img](../assets/images-bugs/starlight_bugs_20230329115941309.png)![img](../assets/images-bugs/starlight_bugs_20230329115947050.png)
+
+2. In PyTorch 1.6, tensors and ints cannot be directly divided using '/'.
+* Solution: Use '//' instead of '/'.
+![img](../assets/images-bugs/starlight_bugs_20230329115940886.png)
+
+3. Calculation graph error. The program ends automatically after the model finishes the forward propagation and returns the result.
+* Problem: The output format is a special format of detectron2, which cannot be recognized by graph_utils.
+* Solution: Use backbone instead of model for pruning, and only prune the backbone part.
+![img](../assets/images-bugs/starlight_bugs_20230329115942777.png)![img](../assets/images-bugs/starlight_bugs_20230329115942130.png)
+
+4. Wrapper.name does not match.
+* Problem: curnode.op_type == 'aten::_convolution', this judgment is not made, resulting in empty parent_layers, which in turn affects channel_depen.
+* Solution: detectron2 has made additional encapsulation on model layer names, which cannot be recognized and classified by NNI.
+![img](../assets/images-bugs/starlight_bugs_20230329115942831.png)![img](../assets/images-bugs/starlight_bugs_20230329115944031.png)
+![img](../assets/images-bugs/starlight_bugs_20230329115943079.png)
+![img](../assets/images-bugs/starlight_bugs_20230329115942986.png)
+
+5. The value of self.channel_depen.dependency_sets is always empty.
+* Problem: Locate the place where dependency_sets is assigned and find that name_to_node in graph_utils.py does not match, and the layer names of the detectron2 encapsulated model cannot be recognized and classified by NNI even if the pth file is modified.
+![img](../assets/images-bugs/starlight_bugs_20230329115945177.png)![img](../assets/images-bugs/starlight_bugs_20230329115945196.png)
+![img](../assets/images-bugs/starlight_bugs_20230329115943915.png)![img](../assets/images-bugs/starlight_bugs_20230329115945603.png)
+
 
 ## PSPNet (Semantic Segmentation)
 
@@ -211,129 +303,6 @@ Cause: The net was not put on cuda when initializing ModelSpeedupTensorRT.
 * Problem: The pyramid structure consists of 5 parallel branches, each of which takes the external input of the entire pyramid. Due to the incorrect definition of the internal connections in the in_place_dict, an error is reported.
 * Solution: Correct the input of the 5 branches to be the same external input x.
 
-## CFNet (Depth Prediction)
-
-### Pruning
-
-1. Environment installation: ModuleNotFoundError: No module named 'OpenEXR'
-* Solution: It is recommended to install this software package using the following steps.
-  ```shell
-     apt-get update
-     apt-get install libopenexr-dev
-     export CFLAGS="-I/Users/USERNAME/homebrew/include/OpenEXR -std=c++11"
-     export LDFLAGS="-L/Users/USERNAME/homebrew/lib"
-     pip install OpenEXR
-  ```
-* Possible issue 1: OpenEXR.cpp:36:10: fatal error: 'ImathBox.h' file not found
-* Solution: apt-get install libopenexr-dev
-* Reference: https://github.com/AcademySoftwareFoundation/openexr/issues/449
-* Possible issue 2: fatal error: 'ImathBox.h' file not found
-* Solution: Set the std for compiling in the following way.
-* Reference: https://github.com/google-research/kubric/issues/19
-```shell
-    export CFLAGS="-I/Users/USERNAME/homebrew/include/OpenEXR -std=c++11"
-    export LDFLAGS="-L/Users/USERNAME/homebrew/lib"
-    pip install OpenEXR
-```
-
-2. Two-input problem
-* Problem: The network contains two inputs.
-* Solution: Set the input parameter dummy_input of the Pruner, such as FPGMPruner, to a tuple (rand_inputs1, rand_inputs2).
-
-3. Check view dimension inconsistency error
-* Problem: There is only one dimension in the input of a node.
-* Solution: Add a dimension number check.
-![img](../assets/images-bugs/starlight_bugs_20230329115936623.png)
-
-4. Error of Update_mask() function due to inconsistent dimensions.
-![img](../assets/images-bugs/starlight_bugs_20230329115936736.png)
-* Solution: When constructing the graph, NNI misjudged the predecessors and successors of two convolutions. Obtain the names of these two convolutions in the network in advance and skip pruning algorithms for these two convolutions during pruning.
-
-5. Model size is too large, and a single card cannot handle it during pruning.
-* Solution: During debugging of pruning, use a very small input size first; after confirming that pruning can proceed normally, set the BatchSize to the minimum value for pruning.
-
-6. After pruning the model, the subsequent 3D convolutions were not pruned, causing the output of the last layer of the pruned part of the model to be inconsistent with the input of the subsequent unpruned part. 
-![img](../assets/images-bugs/starlight_bugs_20230329115938611.png)
-* Solution: Do not prune any output channels of the last convolution in the pruned part.
-
-### Quantization
-
-1. Node identification failed, and the ONNX model generated at this time cannot be opened with Netron. 
-   ![img](../assets/images-bugs/starlight_bugs_20230329115937057.png)
-* Solution: The problem is caused by the use of tensor slicing in forward propagation. Therefore, there are two solutions: Solution 1: Remove the slicing operation in forward propagation; Solution 2: Add the slicing operation plugin.
-* Solution: 1 Test:
-  - Since in the forward propagation, the model repeats the same module twice, so in pruning, the two calls are combined and the result is sliced. Since this slicing operation has a problem during quantization, here the forward propagation is adjusted back to the original mode for testing, that is, two repeated calls without slicing.
-  - Result: It was found that the same problem occurred, it seems that this problem cannot be bypassed. Because there are a lot of slicing operations in other functions in the network. 
-     ![img](../assets/images-bugs/starlight_bugs_20230329115936342.png)![img](../assets/images-bugs/starlight_bugs_20230329115936737.png)
-     ![img](../assets/images-bugs/starlight_bugs_20230329115937602.png)
-  * Solution 2 Test:
-    - Add a plugin that recognizes the above operations and generate, please refer to "YOLOv5-Quantization Issue Log" for details.
-
-2. ONNX cannot be opened:
-* Problem: The problem lies in the fact that the network structure is too large and too complicated.
-* Solution: Extract the problematic part of the network separately as a new network, and it can be opened in ONNX.
-
-3. Quantization error of 3D deconvolution。
-![img](../assets/images-bugs/starlight_bugs_20230329115936975.png)
-* Problem: According to the error prompt, it was found that TensorRT does not yet support asymmetric deconvolution. The official reply will support it in the future.
-![img](../assets/images-bugs/starlight_bugs_20230329115937398.png)
-* Solution: The above problem is mainly caused by output_padding=1 in 3D deconvolution, so after setting it to 0, manually pad the output result with 0, and modify the forward propagation code as follows:
-```python
-# code with bugs
-# conv5 = F.relu(self.conv5(conv4) + self.redir2(conv2), inplace=True)
-# conv6 = F.relu(self.conv6(conv5) + self.redir1(x), inplace=True)
-# code without bugs
-y = self.conv5(conv4)
-y_pad = torch.zeros_like(y)
-y = torch.cat((y, y_pad[:, :, 0, :, :].unsqueeze(dim=2)), dim=2)
-y_pad = torch.zeros_like(y)
-y = torch.cat((y, y_pad[:, :, :, 0, :].unsqueeze(dim=3)), dim=3)
-y_pad = torch.zeros_like(y)
-y = torch.cat((y, y_pad[:, :, :, :, 0].unsqueeze(dim=4)), dim=4)
-y = self.conv5bn(y)
-conv5 = FMish(y + self.redir2(conv2))
-y = self.conv6(conv5)
-y_pad = torch.zeros_like(y)
-y = torch.cat((y, y_pad[:, :, 0, :, :].unsqueeze(dim=2)), dim=2)
-y_pad = torch.zeros_like(y)
-y = torch.cat((y, y_pad[:, :, :, 0, :].unsqueeze(dim=3)), dim=3)
-y_pad = torch.zeros_like(y)
-y = torch.cat((y, y_pad[:, :, :, :, 0].unsqueeze(dim=4)), dim=4)
-y = self.conv6bn(y)
-conv6 = FMish(y + self.redir1(x))
-```
-
-4. Quantization export error when dealing with the IF structure in ONNX
-![img](../assets/images-bugs/starlight_bugs_20230329115937953.png)
-* Problem: After visualizing a problematic segment of the model structure that was quantized individually, it was found that the issue was caused by the `torch.squeeze(x,dim=1)` operation. During quantization, it is necessary to check whether the first dimension is 0, and if so, remove this dimension.
-![img](../assets/images-bugs/starlight_bugs_20230329115938495.png)
-* Solution: During forward propagation, it is clear that the first dimension is 0, so no checking is needed. We can use normal indexing directly. The modified code is as follows:
-```python
-pred2_s4 = F.upsample(pred2_s4 * 8, [left.size()[2], left.size()[3]], mode='bilinear', align_corners=True)
-# pred2_s4 = torch.squeeze(pred2_s4, 1) # 报错代码
-pred2_s4 = pred2_s4[:, 0, :, :] # 正确代码
-pred1_s3_up = F.upsample(pred1_s3 * 4, [left.size()[2], left.size()[3]], mode='bilinear', align_corners=True)
-# pred1_s3_up = torch.squeeze(pred1_s3_up, 1) 
-pred1_s3_up = pred1_s3_up[:, 0, :, :]
-pred1_s2 = F.upsample(pred1_s2 * 2, [left.size()[2], left.size()[3]], mode='bilinear', align_corners=True)
-# pred1_s2 = torch.squeeze(pred1_s2, 1)
-pred1_s2 = pred1_s2[:, 0, :, :]
-```
-
-5. Error occurred when processing Clip structure in ONNX during quantization export.
-* Problem: Assertion failed: inputs.at(2).is_weights() && "Clip max value must be an initializer!"
-* Solution: After investigation, it was found that this problem was caused by the lack of setting the max parameter in the torch.clamp function. Adding a max parameter in all torch.clamp positions can solve this problem.
-
-6. Error occurred when processing torch.gather structure in ONNX during quantization export.
-- Error occurred during quantization code export as shown below:
-![img](../assets/images-bugs/starlight_bugs_20230329115937732.png)
-* The above error does not provide clear information. Therefore, trt_infer.py code was used for debugging, and the following error occurred:
-![img](../assets/images-bugs/starlight_bugs_20230329115938105.png)
-* According to the above error, it can be inferred that the error is due to the lack of support for 'GatherElements'. After torch.gather function is exported to ONNX, it will form a GatherElements node. However, our TensorRT version 7.1.3.4 does not support processing this node.
-![img](../assets/images-bugs/starlight_bugs_20230329115940277.png)
-* After investigation, it was found that TensorRT8.0 supports the GatherElements operation in the form of built-in functions instead of plugins. However, the built-in functions are closed source and cannot be directly referred to. 
-* Solution: To work around the above problem, the model is divided into two parts. The first half is quantized, and the second half uses the original model directly. During testing, the output of the first half is converted to Tensor and directly fed into the second half. Alternatively, a quantizable operation can be used to replace the unquantizable operation.
-![img](../assets/images-bugs/starlight_bugs_20230329115938401.png)
 
 ## EfficientNet-B3 (Semantic Segmentation)
 
@@ -480,6 +449,155 @@ pred1_s2 = pred1_s2[:, 0, :, :]
 * Solution: Remove the square brackets.
 ![img](../assets/images-bugs/starlight_bugs_20230329115940821.png)
 
+## UNet (Drivable Space)
+
+### Pruning
+
+1. Error occurred when exporting pruning code: Given groups=1, weight of size [64, 128, 3, 3], expected input[8, 64, 150, 150] to have 128 channels, but got 64 channels instead.
+Cause: In the Up layer of UNet, nn.ConvTranspose2d is followed by Pad and cat operations. NNI cannot parse the combination of nn.ConvTranspose2d + Pad + Cat operations correctly, causing InferMask to parse the output size of Cat as [8, 64, 150, 150], while the correct size should be [8, 128, 150, 150].
+* Solution: After analysis, it is found that Pad is an invalid operation because its padding size is 0. Removing the Pad operation enables NNI to parse it correctly.
+2. The new model's Pad operation cannot be removed, so a new solution is needed.
+Cause: NNI needs to obtain the input of the node when parsing PyTorch nodes. For the *F.pad(x1, (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2)) operation, the second item of the input (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2) is not a Tensor, aten::, prim::ListUnpack, or prim::TupleUnpack, so it cannot be parsed successfully, resulting in only x1 as the input of the pad node and NNI export failure.
+* Solution: Do not provide the second item input in the forward function, but create a new Pad class and initialize the second item in the init.
+![img](../assets/images-bugs/starlight_bugs_20230329115935951.png)
+* Also, add support for this module in lib/compression/pytorch/speedup/compress_modules.py.
+![img](../assets/images-bugs/starlight_bugs_20230329115935796.png)
+* In practice, the training and inference resolutions are different, and the Pad size is also different. Therefore, add the following function to the model and provide the resolution before training or inference.
+![img](../assets/images-bugs/starlight_bugs_20230329115935916.png)
+![img](../assets/images-bugs/starlight_bugs_20230329115935920.png)
+
+### Quantization
+
+1. Error occurred when loading the quantized model for inference: [TensorRT] ERROR: ../rtSafe/safeContext.cpp (133) - Cudnn Error in configure: 7 (CUDNN_STATUS_MAPPING_ERROR).
+Cause: The net was not put on cuda when initializing ModelSpeedupTensorRT.
+* Solution: net = UNet(n_channels=3, n_classes=1, bilinear=False).to(device).
+
+
+## CFNet (Depth Prediction)
+
+### Pruning
+
+1. Environment installation: ModuleNotFoundError: No module named 'OpenEXR'
+* Solution: It is recommended to install this software package using the following steps.
+  ```shell
+     apt-get update
+     apt-get install libopenexr-dev
+     export CFLAGS="-I/Users/USERNAME/homebrew/include/OpenEXR -std=c++11"
+     export LDFLAGS="-L/Users/USERNAME/homebrew/lib"
+     pip install OpenEXR
+  ```
+* Possible issue 1: OpenEXR.cpp:36:10: fatal error: 'ImathBox.h' file not found
+* Solution: apt-get install libopenexr-dev
+* Reference: https://github.com/AcademySoftwareFoundation/openexr/issues/449
+* Possible issue 2: fatal error: 'ImathBox.h' file not found
+* Solution: Set the std for compiling in the following way.
+* Reference: https://github.com/google-research/kubric/issues/19
+```shell
+    export CFLAGS="-I/Users/USERNAME/homebrew/include/OpenEXR -std=c++11"
+    export LDFLAGS="-L/Users/USERNAME/homebrew/lib"
+    pip install OpenEXR
+```
+
+2. Two-input problem
+* Problem: The network contains two inputs.
+* Solution: Set the input parameter dummy_input of the Pruner, such as FPGMPruner, to a tuple (rand_inputs1, rand_inputs2).
+
+3. Check view dimension inconsistency error
+* Problem: There is only one dimension in the input of a node.
+* Solution: Add a dimension number check.
+![img](../assets/images-bugs/starlight_bugs_20230329115936623.png)
+
+4. Error of Update_mask() function due to inconsistent dimensions.
+![img](../assets/images-bugs/starlight_bugs_20230329115936736.png)
+* Solution: When constructing the graph, NNI misjudged the predecessors and successors of two convolutions. Obtain the names of these two convolutions in the network in advance and skip pruning algorithms for these two convolutions during pruning.
+
+5. Model size is too large, and a single card cannot handle it during pruning.
+* Solution: During debugging of pruning, use a very small input size first; after confirming that pruning can proceed normally, set the BatchSize to the minimum value for pruning.
+
+6. After pruning the model, the subsequent 3D convolutions were not pruned, causing the output of the last layer of the pruned part of the model to be inconsistent with the input of the subsequent unpruned part. 
+![img](../assets/images-bugs/starlight_bugs_20230329115938611.png)
+* Solution: Do not prune any output channels of the last convolution in the pruned part.
+
+### Quantization
+
+1. Node identification failed, and the ONNX model generated at this time cannot be opened with Netron. 
+   ![img](../assets/images-bugs/starlight_bugs_20230329115937057.png)
+* Solution: The problem is caused by the use of tensor slicing in forward propagation. Therefore, there are two solutions: Solution 1: Remove the slicing operation in forward propagation; Solution 2: Add the slicing operation plugin.
+* Solution: 1 Test:
+  - Since in the forward propagation, the model repeats the same module twice, so in pruning, the two calls are combined and the result is sliced. Since this slicing operation has a problem during quantization, here the forward propagation is adjusted back to the original mode for testing, that is, two repeated calls without slicing.
+  - Result: It was found that the same problem occurred, it seems that this problem cannot be bypassed. Because there are a lot of slicing operations in other functions in the network. 
+     ![img](../assets/images-bugs/starlight_bugs_20230329115936342.png)![img](../assets/images-bugs/starlight_bugs_20230329115936737.png)
+     ![img](../assets/images-bugs/starlight_bugs_20230329115937602.png)
+  * Solution 2 Test:
+    - Add a plugin that recognizes the above operations and generate, please refer to "YOLOv5-Quantization Issue Log" for details.
+
+2. ONNX cannot be opened:
+* Problem: The problem lies in the fact that the network structure is too large and too complicated.
+* Solution: Extract the problematic part of the network separately as a new network, and it can be opened in ONNX.
+
+3. Quantization error of 3D deconvolution。
+![img](../assets/images-bugs/starlight_bugs_20230329115936975.png)
+* Problem: According to the error prompt, it was found that TensorRT does not yet support asymmetric deconvolution. The official reply will support it in the future.
+![img](../assets/images-bugs/starlight_bugs_20230329115937398.png)
+* Solution: The above problem is mainly caused by output_padding=1 in 3D deconvolution, so after setting it to 0, manually pad the output result with 0, and modify the forward propagation code as follows:
+```python
+# code with bugs
+# conv5 = F.relu(self.conv5(conv4) + self.redir2(conv2), inplace=True)
+# conv6 = F.relu(self.conv6(conv5) + self.redir1(x), inplace=True)
+# code without bugs
+y = self.conv5(conv4)
+y_pad = torch.zeros_like(y)
+y = torch.cat((y, y_pad[:, :, 0, :, :].unsqueeze(dim=2)), dim=2)
+y_pad = torch.zeros_like(y)
+y = torch.cat((y, y_pad[:, :, :, 0, :].unsqueeze(dim=3)), dim=3)
+y_pad = torch.zeros_like(y)
+y = torch.cat((y, y_pad[:, :, :, :, 0].unsqueeze(dim=4)), dim=4)
+y = self.conv5bn(y)
+conv5 = FMish(y + self.redir2(conv2))
+y = self.conv6(conv5)
+y_pad = torch.zeros_like(y)
+y = torch.cat((y, y_pad[:, :, 0, :, :].unsqueeze(dim=2)), dim=2)
+y_pad = torch.zeros_like(y)
+y = torch.cat((y, y_pad[:, :, :, 0, :].unsqueeze(dim=3)), dim=3)
+y_pad = torch.zeros_like(y)
+y = torch.cat((y, y_pad[:, :, :, :, 0].unsqueeze(dim=4)), dim=4)
+y = self.conv6bn(y)
+conv6 = FMish(y + self.redir1(x))
+```
+
+4. Quantization export error when dealing with the IF structure in ONNX
+![img](../assets/images-bugs/starlight_bugs_20230329115937953.png)
+* Problem: After visualizing a problematic segment of the model structure that was quantized individually, it was found that the issue was caused by the `torch.squeeze(x,dim=1)` operation. During quantization, it is necessary to check whether the first dimension is 0, and if so, remove this dimension.
+![img](../assets/images-bugs/starlight_bugs_20230329115938495.png)
+* Solution: During forward propagation, it is clear that the first dimension is 0, so no checking is needed. We can use normal indexing directly. The modified code is as follows:
+```python
+pred2_s4 = F.upsample(pred2_s4 * 8, [left.size()[2], left.size()[3]], mode='bilinear', align_corners=True)
+# pred2_s4 = torch.squeeze(pred2_s4, 1) # 报错代码
+pred2_s4 = pred2_s4[:, 0, :, :] # 正确代码
+pred1_s3_up = F.upsample(pred1_s3 * 4, [left.size()[2], left.size()[3]], mode='bilinear', align_corners=True)
+# pred1_s3_up = torch.squeeze(pred1_s3_up, 1) 
+pred1_s3_up = pred1_s3_up[:, 0, :, :]
+pred1_s2 = F.upsample(pred1_s2 * 2, [left.size()[2], left.size()[3]], mode='bilinear', align_corners=True)
+# pred1_s2 = torch.squeeze(pred1_s2, 1)
+pred1_s2 = pred1_s2[:, 0, :, :]
+```
+
+5. Error occurred when processing Clip structure in ONNX during quantization export.
+* Problem: Assertion failed: inputs.at(2).is_weights() && "Clip max value must be an initializer!"
+* Solution: After investigation, it was found that this problem was caused by the lack of setting the max parameter in the torch.clamp function. Adding a max parameter in all torch.clamp positions can solve this problem.
+
+6. Error occurred when processing torch.gather structure in ONNX during quantization export.
+- Error occurred during quantization code export as shown below:
+![img](../assets/images-bugs/starlight_bugs_20230329115937732.png)
+* The above error does not provide clear information. Therefore, trt_infer.py code was used for debugging, and the following error occurred:
+![img](../assets/images-bugs/starlight_bugs_20230329115938105.png)
+* According to the above error, it can be inferred that the error is due to the lack of support for 'GatherElements'. After torch.gather function is exported to ONNX, it will form a GatherElements node. However, our TensorRT version 7.1.3.4 does not support processing this node.
+![img](../assets/images-bugs/starlight_bugs_20230329115940277.png)
+* After investigation, it was found that TensorRT8.0 supports the GatherElements operation in the form of built-in functions instead of plugins. However, the built-in functions are closed source and cannot be directly referred to. 
+* Solution: To work around the above problem, the model is divided into two parts. The first half is quantized, and the second half uses the original model directly. During testing, the output of the first half is converted to Tensor and directly fed into the second half. Alternatively, a quantizable operation can be used to replace the unquantizable operation.
+![img](../assets/images-bugs/starlight_bugs_20230329115938401.png)
+
+
 ## HSMNet (Location)
 
 ### Pruning
@@ -512,119 +630,6 @@ pred1_s2 = pred1_s2[:, 0, :, :]
 ![img](../assets/images-bugs/starlight_bugs_20230329115941267.png)
 * Solution: This issue indicates that the localization model needs to handle input data with inconsistent sizes, while model quantization requires fixed input sizes. Therefore, this model cannot be quantized.
 
-## PMR-CNN（Few-shot Object Detection）
-
-### Pruning
-
-1. Input format issue.
-* Problem: PMR-CNN is designed based on the detectron2 framework, which requires inputs in dictionary format, while the input format required by the pruner is tensor.
-* Solution: Enter the inference module and write other key values in the dictionary as fixed values. Use the 'image' part as dummy_input and only input tensor.
-![img](../assets/images-bugs/starlight_bugs_20230329115941309.png)![img](../assets/images-bugs/starlight_bugs_20230329115947050.png)
-
-2. In PyTorch 1.6, tensors and ints cannot be directly divided using '/'.
-* Solution: Use '//' instead of '/'.
-![img](../assets/images-bugs/starlight_bugs_20230329115940886.png)
-
-3. Calculation graph error. The program ends automatically after the model finishes the forward propagation and returns the result.
-* Problem: The output format is a special format of detectron2, which cannot be recognized by graph_utils.
-* Solution: Use backbone instead of model for pruning, and only prune the backbone part.
-![img](../assets/images-bugs/starlight_bugs_20230329115942777.png)![img](../assets/images-bugs/starlight_bugs_20230329115942130.png)
-
-4. Wrapper.name does not match.
-* Problem: curnode.op_type == 'aten::_convolution', this judgment is not made, resulting in empty parent_layers, which in turn affects channel_depen.
-* Solution: detectron2 has made additional encapsulation on model layer names, which cannot be recognized and classified by NNI.
-![img](../assets/images-bugs/starlight_bugs_20230329115942831.png)![img](../assets/images-bugs/starlight_bugs_20230329115944031.png)
-![img](../assets/images-bugs/starlight_bugs_20230329115943079.png)
-![img](../assets/images-bugs/starlight_bugs_20230329115942986.png)
-
-5. The value of self.channel_depen.dependency_sets is always empty.
-* Problem: Locate the place where dependency_sets is assigned and find that name_to_node in graph_utils.py does not match, and the layer names of the detectron2 encapsulated model cannot be recognized and classified by NNI even if the pth file is modified.
-![img](../assets/images-bugs/starlight_bugs_20230329115945177.png)![img](../assets/images-bugs/starlight_bugs_20230329115945196.png)
-![img](../assets/images-bugs/starlight_bugs_20230329115943915.png)![img](../assets/images-bugs/starlight_bugs_20230329115945603.png)
-
-
-## FasterRCNN（Object Detection）
-
-* Due to conflicts between the tcb environment and Starlight, there are conflicts between some of the source code of mmdet1 and Starlight after migrating to a new environment. Therefore, we attempted to use Starlight pruning under the mmdetection2 framework.
-
-### Pruning
-
-1. Error occurs when inputting, requiring additional input of img_meta.
-* Problem: The forward() function in mmdetection2 by default calls the forward function in the training stage, which requires additional data information to be input; whereas the pruner only inputs one tensor.
-* Solution: Set forward_dummy() to the default way in mmdet/models/detectors/base.py. 
-![img](../assets/images-bugs/starlight_bugs_20230329115944204.png)
-
-2. After pruning, when loading weights again, the model parameter name does not match the weight file.
-* Problem: When the Prunner prunes the model, it encapsulates the model, and the format of the pruned model object is different from that before pruning.
-* Solution: **Be sure to initialize a new model instance** before loading weights.
-
-### Quantization
-1. Error: from lib.compression.pytorch.utils.counter import count_flops_params.
-![img](../assets/images-bugs/starlight_bugs_20230329115944513.png)
-
-2. Missing prettytable.
-* Solution: Install it using pip.
-
-## VGG-SSD (Detection)
-
-### Pruning
-
-1. When using the FPGM method, torch.jit.trace cannot trace the model and reports an error as follows:
-![img](../assets/images-bugs/starlight_bugs_20230329115944541.png)
-* Problem: The model has three outputs as shown below. The third output, self.priors, is a constant that is independent of the input, leading to the above issue. 
-![img](../assets/images-bugs/starlight_bugs_20230329115944689.png)
-* Solution: Rewrite an SSD model file, and make two changes. (1) Move the output self.priors out of the forward function of SSD. (2) Put self.priors into the output during the calculation of loss.
-
-### Quantization
-
-1. Error occurs when exporting the onnx model during quantization.
-* Problem:
-![img](../assets/images-bugs/starlight_bugs_20230329115945106.png)
-* Solution: Use torch.onnx.export() directly.
-
-## YOLOv5 (Detection)
-
-### Pruning
-
-1. Here, the cat operation should concatenate two tensors, the current layer and a previous layer in the network. The error is because x is just a tensor, so it concatenates itself. 
-![img](../assets/images-bugs/starlight_bugs_20230329115944991.png)
-* Solution：
-```python
-def forward(self, x): 
-    return torch.cat(tuple(x,), self.d)
-```
-
-2. Error occurs.
-![img](../assets/images-bugs/starlight_bugs_20230329115945301.png)
-![img](../assets/images-bugs/starlight_bugs_20230329115945637.png)
-* The specific location of the above error cannot be identified. Later, through step-by-step debugging, it was located at the following if statement during forward propagation. 
-![img](../assets/images-bugs/starlight_bugs_20230329115945661.png)
-* The error is as follows.
-![img](../assets/images-bugs/starlight_bugs_20230329115945709.png)
-* A similar error was found online at https://stackoverflow.com/questions/66746307/torch-jit-trace-tracerwarning-converting-a-tensor-to-a-python-boolean-might-c
-* Solution: Do not have uncertain judgment statements such as if or for during forward propagation. Since the if statement was true every time during debugging, the if statement was removed and the statements under the if condition were executed directly. 
-![img](../assets/images-bugs/starlight_bugs_20230329115945581.png)
-
-3. Error
-![img](../assets/images-bugs/starlight_bugs_20230329115945996.png)
-* Problem: dummy_input is empty. Later, through step-by-step debugging, it was found that model.42.aten::select.291 had no input, as shown in the figure below. 
-![img](../assets/images-bugs/starlight_bugs_20230329115945995.png)
-* In addition, during forward propagation, the following two lines, self.stride and self.anchor_grid, are not defined. This problem did not occur in the original model inference, because the weights loaded in the original model inference contained these two variables, while the jit.trace process after compression could not find these two variables.
-![img](../assets/images-bugs/starlight_bugs_20230329115946130.png)
-* Solution: Add the following lines to assign values to these two variables.
-![img](../assets/images-bugs/starlight_bugs_20230329115946290.png)
-
-### Quantization
-
-1. After exporting onnx, during the engine generation process, an error occurred: (probably missing the ScatterND plugin)
-> [TensorRT] ERROR: INVALID_ARGUMENT: getPluginCreator could not find plugin ScatterND version 1
-> ERROR: Fail to parse the ONNX file.
-> In node -1 (importFallbackPluginImporter): UNSUPPORTED_NODE: Assertion failed: creator && "Plugin not found, are the plugin name, version, and namespace correct?"
-* Solution: https://blog.csdn.net/HW140701/article/details/120377483
-  * Successfully compiled the ScatterND.so file. Then, add two lines of code in the following file using the ModelSpeedupTensorRT method to specify the path of the plugin.so file.
-  ![img](../assets/images-bugs/starlight_bugs_20230329115946915.png)
-  * Also, when loading the quantized model with engine.load_quantized_model(trt_path), specify the plugin.so file.
-  ![img](../assets/images-bugs/starlight_bugs_20230329115946272.png)
 
 ## PixelNet (Push)
 
