@@ -85,7 +85,7 @@ IndexError: too many indices for array: array is 1-dimensional, but 2 were index
 * Solution: Redefine the optimizer before fine-tuning as shown below:
 ![img](../assets/images-bugs/starlight_bugs_20230329115935609.png)
 
-### 量化问题记录
+### Quantization
 
 1. The inference function in ModelSpeedupTensorRT in the lib package only supports single output, while the detection model has two outputs.
 * Solution: Create a new file called quan_model.py and rewrite the SSD model by adding an inference function that calls the quantized trt model to get the dual output results. The modification is as follows:
@@ -154,7 +154,7 @@ Solution: Only calculate the GPU inference time and remove the aforementioned tw
 
 ## UNet (Drivable Space)
 
-### 剪枝问题记录
+### Pruning
 
 1. Error occurred when exporting pruning code: Given groups=1, weight of size [64, 128, 3, 3], expected input[8, 64, 150, 150] to have 128 channels, but got 64 channels instead.
 Cause: In the Up layer of UNet, nn.ConvTranspose2d is followed by Pad and cat operations. NNI cannot parse the combination of nn.ConvTranspose2d + Pad + Cat operations correctly, causing InferMask to parse the output size of Cat as [8, 64, 150, 150], while the correct size should be [8, 128, 150, 150].
@@ -411,7 +411,7 @@ pred1_s2 = pred1_s2[:, 0, :, :]
                    x = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
                    return x
            ```
-     * 修改后的代码，剪枝时可自动识别：
+     * Updated code, able to recognize the following modules during pruning:
         ```python
            class Conv2dStaticSamePadding(nn.Module):
                """2D Convolutions like TensorFlow's 'SAME' mode, with the given input image size.
