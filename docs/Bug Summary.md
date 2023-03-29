@@ -21,7 +21,6 @@ nav_order: 9
 1. 使用FPGM方法时，torch.jit.trace无法追踪模型
 * 原因：模型有三个输出，如下。其中第三个输出self.priors为常量，与输入无关，导致上述问题
 ![img](../assets/images-bugs/starlight_bugs_20230329115935476.png)
-
 * 解决：重写一个SSD模型文件，仅需改变两点。（1）将输出self.priors从SSD的forward函数中移出（2）在计算loss间，将self.priors放入output中
 ![img](../assets/images-bugs/starlight_bugs_20230329115935488.png)
 ![img](../assets/images-bugs/starlight_bugs_20230329115935446.png)
@@ -52,14 +51,12 @@ File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.p
 ```
 * 原因：模型输出的loc和cls是通过卷积得到的，而剪枝会剪掉这些输出层的卷积，导致输出尺寸变小，从而报错
 * 解决：添加op_names,仅剪枝非输出层的卷积
-3. nms在服务器上时间过慢
 
+3. nms在服务器上时间过慢
 ![img](../assets/images-bugs/starlight_bugs_20230329115935418.png)
 * 原因：nms是在cpu运行的，而服务器上有太多程序在跑，导致cpu负载过大 
 * 解决：在gpu上使用nms
-
 ![img](../assets/images-bugs/starlight_bugs_20230329115935429.png)
-
 **补充**：**不建议使用gpu的nms**，因为会导致代码在forward的时候出错，包括https://www.cnblogs.com/naive-LR/p/14256624.html和https://blog.csdn.net/m0_38007695/article/details/107065617，后者的解决方案无效。
 
 4. 模型剪枝后微调前推理会报如下错误：
@@ -84,10 +81,9 @@ IndexError: too many indices for array: array is 1-dimensional, but 2 were index
 ![img](../assets/images-bugs/starlight_bugs_20230329115935533.png)
 ![img](../assets/images-bugs/starlight_bugs_20230329115935583.png)
 
-5模型剪枝后精度很难恢复 
+5. 模型剪枝后精度很难恢复 
 * 原因：模型微调前，使用剪枝前的optimizer，导致优化参数是剪枝前的参数，而非导出剪枝模型后的参数，所以微调效果有限
 * 解决：微调前重新定义optimizer
-
 ![img](../assets/images-bugs/starlight_bugs_20230329115935609.png)
 
 ### 量化问题记录
@@ -288,7 +284,6 @@ a. 解决：在torch.onnx.export()参数列表末尾添加一个参数  “opset
 # 报错代码
 # conv5 = F.relu(self.conv5(conv4) + self.redir2(conv2), inplace=True)
 # conv6 = F.relu(self.conv6(conv5) + self.redir1(x), inplace=True)
-
 # 正确代码
 y = self.conv5(conv4)
 y_pad = torch.zeros_like(y)
@@ -299,7 +294,6 @@ y_pad = torch.zeros_like(y)
 y = torch.cat((y, y_pad[:, :, :, :, 0].unsqueeze(dim=4)), dim=4)
 y = self.conv5bn(y)
 conv5 = FMish(y + self.redir2(conv2))
-
 y = self.conv6(conv5)
 y_pad = torch.zeros_like(y)
 y = torch.cat((y, y_pad[:, :, 0, :, :].unsqueeze(dim=2)), dim=2)
@@ -321,12 +315,9 @@ conv6 = FMish(y + self.redir1(x))
 pred2_s4 = F.upsample(pred2_s4 * 8, [left.size()[2], left.size()[3]], mode='bilinear', align_corners=True)
 # pred2_s4 = torch.squeeze(pred2_s4, 1) # 报错代码
 pred2_s4 = pred2_s4[:, 0, :, :] # 正确代码
-
-pred1_s3_up = F.upsample(pred1_s3 * 4, [left.size()[2], left.size()[3]], mode='bilinear',
-                         align_corners=True)
+pred1_s3_up = F.upsample(pred1_s3 * 4, [left.size()[2], left.size()[3]], mode='bilinear', align_corners=True)
 # pred1_s3_up = torch.squeeze(pred1_s3_up, 1) 
 pred1_s3_up = pred1_s3_up[:, 0, :, :]
-
 pred1_s2 = F.upsample(pred1_s2 * 2, [left.size()[2], left.size()[3]], mode='bilinear', align_corners=True)
 # pred1_s2 = torch.squeeze(pred1_s2, 1)
 pred1_s2 = pred1_s2[:, 0, :, :]
