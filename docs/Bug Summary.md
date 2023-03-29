@@ -90,13 +90,9 @@ IndexError: too many indices for array: array is 1-dimensional, but 2 were index
 
 1. lib包中的ModelSpeedupTensorRT的inference仅支持单输出，而检测模型是二输出
    1. 解决：新建一个quan_model.py，重写SSD模型，修改内容为添加一个inference函数，作用是调用量化的trt模型得到双输出结果。修改如下：
-
 * SSD模型添加load_engine函数
-
 ![img](../assets/images-bugs/starlight_bugs_20230329115935595.png)
-
 * SSD模型添加inference(self, x)，注意：由于要torch转onnx，所以要参考剪枝问题1设计模型
-
 ```python
 def inference(self, x):
         """
@@ -140,11 +136,8 @@ def inference(self, x):
         result_loc = torch.Tensor(np.concatenate(result_loc))
         return result_cls, result_loc, elapsed_time
 ```
-
 * 推理前load_engine，推理中调用inference函数
-
 ![img](../assets/images-bugs/starlight_bugs_20230329115935609-0062375.png)
-
 ![img](../assets/images-bugs/starlight_bugs_20230329115935623.png)
 
 2. 模型compress时，报如下错误：
@@ -153,7 +146,6 @@ TypeError       (note: full exception trace is shown but execution is paused at:
 The element type in the input tensor is not defined.
   File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/site-packages/onnx/numpy_helper.py", line 37, in to_array    raise TypeError("The element type in the input tensor is not defined.")  File "/home/yanglongxing/project/Compress_ResNet50_Detection/lib/compression/pytorch/quantization_speedup/frontend_to_onnx.py", line 82, in unwrapper    index = int(onnx.numpy_helper.to_array(const_nd.attribute[0].t))  File "/home/yanglongxing/project/Compress_ResNet50_Detection/lib/compression/pytorch/quantization_speedup/frontend_to_onnx.py", line 144, in torch_to_onnx    model_onnx, onnx_config = unwrapper(model_onnx, index2name, config)  File "/home/yanglongxing/project/Compress_ResNet50_Detection/lib/compression/pytorch/quantization_speedup/integrated_tensorrt.py", line 303, in compress    _, self.onnx_config = fonnx.torch_to_onnx(self.model, self.config, input_shape=self.input_shape, model_path=self.onnx_path, input_names=self.input_names, output_names=self.output_names)  File "/home/yanglongxing/project/Compress_ResNet50_Detection/quan.py", line 229, in main    engine.compress()  File "/home/yanglongxing/project/Compress_ResNet50_Detection/quan.py", line 241, in <module> (Current frame)    main()  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 85, in _run_code    exec(code, run_globals)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 96, in _run_module_code    mod_name, mod_spec, pkg_name, script_name)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 263, in run_path    pkg_name=pkg_name, script_name=fname)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 85, in _run_code    exec(code, run_globals)  File "/home/yanglongxing/anaconda3/envs/py36-torch1.6-trt7/lib/python3.6/runpy.py", line 193, in _run_module_as_main    "__main__", mod_spec)
 ```
-
 * 解决：注释*fonnx.torch_to_onnx，*直接用torch导出onnx模型。
 ![img](../assets/images-bugs/starlight_bugs_20230329115936123.png)
 
@@ -167,16 +159,15 @@ The element type in the input tensor is not defined.
 ### 剪枝问题记录
 
 1. 导出剪枝代码时报错：Given groups=1, weight of size [64, 128, 3, 3], expected input[8, 64, 150, 150] to have 128 channels, but got 64 channels instead
-   1. 原因：在UNet的Up layer中，nn.ConvTranspose2d后使用了Pad和cat操作，NNI不能够正确解析nn.ConvTranspose2d + Pad + Cat操作的组合，导致InferMask时将Cat的输出尺寸解析成[8, 64, 150, 150]，而正确的为[8, 128, 150, 150]
-   2. 解决：经过分析发现，Pad为无效操作，因为其Pad的尺寸为0。将Pad操作删除后，NNI便可正确解析。
+* 原因：在UNet的Up layer中，nn.ConvTranspose2d后使用了Pad和cat操作，NNI不能够正确解析nn.ConvTranspose2d + Pad + Cat操作的组合，导致InferMask时将Cat的输出尺寸解析成[8, 64, 150, 150]，而正确的为[8, 128, 150, 150]
+* 解决：经过分析发现，Pad为无效操作，因为其Pad的尺寸为0。将Pad操作删除后，NNI便可正确解析。
+
 2. 新模型的Pad操作不能去掉，所以需要提供新的解决方法。
-   1. 原因：nni在解析Pytorch节点时，需要获取节点的输入，而对于*F.pad(x1, (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2))操作，第二项输入(diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2)非Tensor，aten::，prim::ListUnpack，prim::TupleUnpack，所以不能被成功解析，导致pad节点的输入只有x1，导致nni导出失败。*
-   2. 解决：不在forward函数中提供第二项输入，而是新建一个Pad类并在init中初始化第二项
+* 原因：nni在解析Pytorch节点时，需要获取节点的输入，而对于*F.pad(x1, (diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2))操作，第二项输入(diffX // 2, diffX - diffX // 2, diffY // 2, diffY - diffY // 2)非Tensor，aten::，prim::ListUnpack，prim::TupleUnpack，所以不能被成功解析，导致pad节点的输入只有x1，导致nni导出失败。*
+* 解决：不在forward函数中提供第二项输入，而是新建一个Pad类并在init中初始化第二项
 ![img](../assets/images-bugs/starlight_bugs_20230329115935951.png)
-
-   同时，需要在lib/compression/pytorch/speedup/compress_modules.py中添加对该Module的支持。
+* 同时，需要在lib/compression/pytorch/speedup/compress_modules.py中添加对该Module的支持。
 ![img](../assets/images-bugs/starlight_bugs_20230329115935796.png)
-
  实践中，训练和推理分辨率不同，Pad的尺寸也不同，需要在model中添加如下函数，并在训练或/推理前提供分辨率
 ![img](../assets/images-bugs/starlight_bugs_20230329115935916.png)
 ![img](../assets/images-bugs/starlight_bugs_20230329115935920.png)
@@ -184,23 +175,22 @@ The element type in the input tensor is not defined.
 ### 量化问题记录
 
 1. 加载量化模型推理时报[TensorRT] ERROR: ../rtSafe/safeContext.cpp (133) - Cudnn Error in configure: 7 (CUDNN_STATUS_MAPPING_ERROR)
-   1. 原因：初始化ModelSpeedupTensorRT是的net没有放到cuda上
-   2. 解决：net = UNet(n_channels=3, n_classes=1, bilinear=False)**.to(device)**
+* 原因：初始化ModelSpeedupTensorRT是的net没有放到cuda上
+* 解决：net = UNet(n_channels=3, n_classes=1, bilinear=False)**.to(device)**
 
 ## PSPNet (Semantic Segmentation)
 
 ### 剪枝问题记录
 
 1. 下采样层，由于residule带有卷积，residual剪枝后和主分支剪枝后的通道相加不对应
-   1. 解决：设定residule卷积输出通道与该block最后一个卷积输出通道的被剪枝index相同
+* 解决：设定residule卷积输出通道与该block最后一个卷积输出通道的被剪枝index相同
 2. 微调时，模型测试时间太长
-   1. 解决：仅使用10张图片进行模型测试，判断停止点
+* 解决：仅使用10张图片进行模型测试，判断停止点
 
 ### 量化问题记录
 
 1. 导出模型时， RuntimeError: ONNX export failed: Couldn't export operator aten::upsample_bilinear2d
-
-a. 解决：在torch.onnx.export()参数列表末尾添加一个参数  “opset_version=11”
+* 解决：在torch.onnx.export()参数列表末尾添加一个参数  “opset_version=11”
 
 ## DeepLabV3 (Semantic Segmentation)
 
@@ -209,9 +199,11 @@ a. 解决：在torch.onnx.export()参数列表末尾添加一个参数  “opset
 1. 网络最后的输出层被剪枝，导致语义分割任务的输出类别不一致
 * 原因：使用自动导出的方法容易存在该问题，无法自动处理
 * 解决：使用手动剪枝
+
 2. 残差块的第一个带下采样的层，通道无法对齐
 * 原因：由于in_place_dict中结构顺序撰写错误导致
 * 解决：修正每个残差块的第一个下采样层的输入为残差支路的x而不是带卷积支路的x
+
 3. ASPP通道无法对齐
 * 原因：金字塔结构是并联的5个分支，每个分支的输入均为金字塔整体的外部输入，由于in_place_dict中将金字塔内部的连接关系定义错误，因此导致报错
 * 解决：修正5个分支的输入均为同一个外部输入x
@@ -241,29 +233,31 @@ a. 解决：在torch.onnx.export()参数列表末尾添加一个参数  “opset
       export LDFLAGS="-L/Users/USERNAME/homebrew/lib"
       pip install OpenEXR
    ```
+
 2. 两个输入问题
    * 问题：网络包含两个输入
    * 解决：将剪枝器（Pruner）如FPGMPruner的输入参数dummy_input改为元组(rand_inputs1, rand_inputs2)
+
 3. 检查view维度不一致报错
    * 问题：一个节点的输入只有一个维度
    * 解决：加入维度数量判断
    ![img](../assets/images-bugs/starlight_bugs_20230329115936623.png)
+
 4. Update_mask()函数维度不一致报错
    ![img](../assets/images-bugs/starlight_bugs_20230329115936736.png)
 
    * 解决：nni在构图时，其中两个卷积的前驱与后继判断错误。提前获取这两个卷积在网络中的名称，剪枝时设定剪枝算法跳过这两个卷积，不对它们进行剪枝即可。
 5. 模型尺寸过大，剪枝时单张卡放不下
    * 解决：Debug剪枝时，先使用特别小的输入尺寸；确认剪枝可正常进行后，设定BatchSize为最小值，进行剪枝。
+
 6. 模型剪枝完成，但后续的3D卷积没有剪枝，导致模型剪枝部分的最后一层输出与后续未剪枝部分的输入不匹配
    ![img](../assets/images-bugs/starlight_bugs_20230329115938611.png)
-
    * 解决：剪枝部分的最后一个卷积的输出通道全都不剪
 
 ### 量化问题记录
 
 1. 节点无法识别，而且此时生成的ONNX模型无法用Netron打开
    ![img](../assets/images-bugs/starlight_bugs_20230329115937057.png)
-
 * 解决记录：查到这个问题是由于前向传播中用到Tensor切片导致的。因此有两种解决方案：解法1：去掉前向传播中的切片操作；解法2：加入切片操作的插件
   * 解法1测试：
      * 由于在前向传播中，这个模型对相同的模块进行了两次重复调用，所以在剪枝时将两次调用合并，对结果进行切片。由于该切片操作在量化时出现问题，因此这里还是将前向传播调整回原始模式进行测试，即两次重复调用，不进行切片。
