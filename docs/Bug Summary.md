@@ -548,101 +548,100 @@ pred1_s2 = pred1_s2[:, 0, :, :]
 
 ## FasterRCNN（Object Detection）
 
-* 由于tcb环境与starlight冲突，在迁移到新环境后，mmdet1的部分源码与Starlight有冲突。因此尝试在mmdetection2框架下使用starlight剪枝
+* Due to conflicts between the tcb environment and Starlight, there are conflicts between some of the source code of mmdet1 and Starlight after migrating to a new environment. Therefore, we attempted to use Starlight pruning under the mmdetection2 framework.
 
-### 剪枝问题记录
+### Pruning
 
-1. 输入报错，需要额外输入img_meta。
-* 原因：mmdetection2中forward()默认调用训练阶段的forward函数，需要输入额外的数据信息；而pruner只输入一个tensor。
-* 解决：在mmdet/models/detectors/base.py 将forward_dummy() 设置为默认方式
+1. Error occurs when inputting, requiring additional input of img_meta.
+
+- Reason: The forward() function in mmdetection2 by default calls the forward function in the training stage, which requires additional data information to be input; whereas the pruner only inputs one tensor.
+- Solution: Set forward_dummy() to the default way in mmdet/models/detectors/base.py. 
 ![img](../assets/images-bugs/starlight_bugs_20230329115944204.png)
 
-2. 剪枝后，再次加载权重，模型参数名称与权重文件不匹配
-* 原因：Prunner进行剪枝时，会对模型进行封装，剪枝后的模型对象格式与剪枝前不同。
-* 解决：加载权重前，务必**重新初始化一个新的模型实例**。
+2. After pruning, when loading weights again, the model parameter name does not match the weight file.
+- Reason: When the Prunner prunes the model, it encapsulates the model, and the format of the pruned model object is different from that before pruning.
+- Solution: **Be sure to initialize a new model instance** before loading weights.
 
-### 量化问题记录
+### Quantization
 
-1. error：from lib.compression.pytorch.utils.counter import count_flops_params
+1. Error: from lib.compression.pytorch.utils.counter import count_flops_params.
 ![img](../assets/images-bugs/starlight_bugs_20230329115944513.png)
-2. 缺少prettytable
-* 解决：使用pip安装即可。
+2. Missing prettytable.
+- Solution: Install it using pip.
 
 ## VGG-SSD (Detection)
 
-### 剪枝问题记录
+### Pruning
 
-1. 问题：使用FPGM方法时，torch.jit.trace无法追踪模型，报错如下：
+1. Issue: When using the FPGM method, torch.jit.trace cannot trace the model and reports an error as follows:
 ![img](../assets/images-bugs/starlight_bugs_20230329115944541.png)
-* 原因：模型有三个输出，如下。其中第三个输出self.priors为常量，与输入无关，导致上述问题
+* Reason: The model has three outputs as shown below. The third output, self.priors, is a constant that is independent of the input, leading to the above issue. 
 ![img](../assets/images-bugs/starlight_bugs_20230329115944689.png)
-* 解决：重写一个SSD模型文件，需要改变两点。（1）将输出self.priors从SSD的forward函数中移出（2）在计算loss间，将self.priors放入output中
+* Solution: Rewrite an SSD model file, and make two changes. (1) Move the output self.priors out of the forward function of SSD. (2) Put self.priors into the output during the calculation of loss.
 
 ### 量化问题记录
 
-1. 问题：量化时导出onnx模型错误
-* 原因：
+1. Issue: Error occurs when exporting the onnx model during quantization.
+* Reason:
 ![img](../assets/images-bugs/starlight_bugs_20230329115945106.png)
-* 解决：直接用torch.onnx.export()
+* Solution: Use torch.onnx.export() directly.
 
 ## YOLOv5 (Detection)
 
-### 剪枝问题记录
+### Pruning
 
-1. 这里的cat操作应该是当前层和网络中的前面某一层的两个tensor进行拼接，而这里报错是因为x只是一个tensor，所以是自己跟自己拼接。
+1. Here, the cat operation should concatenate two tensors, the current layer and a previous layer in the network. The error is because x is just a tensor, so it concatenates itself. 
 ![img](../assets/images-bugs/starlight_bugs_20230329115944991.png)
-* 解决：
+* Solution：
 ```python
 def forward(self, x): 
     return torch.cat(tuple(x,), self.d)
 ```
 
-2. 报错
+2. Error occurs.
 ![img](../assets/images-bugs/starlight_bugs_20230329115945301.png)
 ![img](../assets/images-bugs/starlight_bugs_20230329115945637.png)
-* 上述报错无法定位具体位置，后来经过单步调试，定位到前向传播运行到如下if 函数时
+* The specific location of the above error cannot be identified. Later, through step-by-step debugging, it was located at the following if statement during forward propagation. 
 ![img](../assets/images-bugs/starlight_bugs_20230329115945661.png)
-* 报错如下
+* The error is as follows.
 ![img](../assets/images-bugs/starlight_bugs_20230329115945709.png)
-
-* 网上查找，类似的错误https://stackoverflow.com/questions/66746307/torch-jit-trace-tracerwarning-converting-a-tensor-to-a-python-boolean-might-c
-* 解决：前向传播不要出现不确定的判断语句if或for等。由于调试时每次if语句都为真，因此删除if判断，直接运行if条件下的语句
+* A similar error was found online at https://stackoverflow.com/questions/66746307/torch-jit-trace-tracerwarning-converting-a-tensor-to-a-python-boolean-might-c
+* Solution: Do not have uncertain judgment statements such as if or for during forward propagation. Since the if statement was true every time during debugging, the if statement was removed and the statements under the if condition were executed directly. 
 ![img](../assets/images-bugs/starlight_bugs_20230329115945581.png)
 
-3. 错误
+3. Error
 ![img](../assets/images-bugs/starlight_bugs_20230329115945996.png)
-* 原因：dummy_input为空，后来经过单步调试，model.42.aten::select.291没有输入，如下图所示
+* Reason: dummy_input is empty. Later, through step-by-step debugging, it was found that model.42.aten::select.291 had no input, as shown in the figure below. 
 ![img](../assets/images-bugs/starlight_bugs_20230329115945995.png)
-* 另外，前向传播时下面两行，self.stride和self.anchor_grid没有定义，原始模型前向传播不存在此问题，是因为原始模型推理时加载的权重中有这两个变量，而压缩之后jit.trace过程会找不到这两个变量
+* In addition, during forward propagation, the following two lines, self.stride and self.anchor_grid, are not defined. This problem did not occur in the original model inference, because the weights loaded in the original model inference contained these two variables, while the jit.trace process after compression could not find these two variables.
 ![img](../assets/images-bugs/starlight_bugs_20230329115946130.png)
-* 解决：添加下面几行，给这两个变量赋值
+* Solution: Add the following lines to assign values to these two variables.
 ![img](../assets/images-bugs/starlight_bugs_20230329115946290.png)
 
-### 量化问题记录
+### Quantization
 
-1. 导出onnx后，生成engine过程，报错：（应该是缺少ScatterND插件）
+1. After exporting onnx, during the engine generation process, an error occurred: (probably missing the ScatterND plugin)
 > [TensorRT] ERROR: INVALID_ARGUMENT: getPluginCreator could not find plugin ScatterND version 1
 > ERROR: Fail to parse the ONNX file.
 > In node -1 (importFallbackPluginImporter): UNSUPPORTED_NODE: Assertion failed: creator && "Plugin not found, are the plugin name, version, and namespace correct?"
 
-* 解决：https://blog.csdn.net/HW140701/article/details/120377483
-  * 至此成功编译出ScatterND.so文件。下面加载插件导出trt
-  * 利用ModelSpeedupTensorRT方式，在如下文件添加两行代码，指定插件.so文件的路径
+* Solution: https://blog.csdn.net/HW140701/article/details/120377483
+  * Successfully compiled the ScatterND.so file. Then, add two lines of code in the following file using the ModelSpeedupTensorRT method to specify the path of the plugin.so file.
   ![img](../assets/images-bugs/starlight_bugs_20230329115946915.png)
-  * 同时engine.load_quantized_model(trt_path)时，也要指定插件.so文件
+  * Also, when loading the quantized model with engine.load_quantized_model(trt_path), specify the plugin.so file.
   ![img](../assets/images-bugs/starlight_bugs_20230329115946272.png)
 
 ## PixelNet (Push)
 
-### 剪枝问题记录
+### Pruning
 
-1. 网络有两个输入，一个是RGB图，另一个是深度图
-* 解决：定义的FPGM的输入也需要将两个输入写成一个tuple传入，如下
+1. The network has two inputs, one is an RGB image, and the other is a depth image.
+* Solution: The input of the defined FPGM also needs to be written as a tuple and passed in, as shown below.
 ![img](../assets/images-bugs/starlight_bugs_20230329115946414.png)
 
-### 量化问题记录
+### Quantization
 
-1. 量化后的模型进行推理时，报错如下：
+1. After quantization, when inferring the model, the following error occurred:
 ![img](../assets/images-bugs/starlight_bugs_20230329115946617.png)
-* 解决：
+* Solution：
 ![img](../assets/images-bugs/starlight_bugs_20230329115946772.png)
