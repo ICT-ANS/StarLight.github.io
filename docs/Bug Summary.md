@@ -356,22 +356,22 @@ pred1_s2 = pred1_s2[:, 0, :, :]
 ### 剪枝问题记录
 
 1. Tensor和int数值无法直接相除
-   1. ![img](../assets/images-bugs/starlight_bugs_20230329115939830.png)
+![img](../assets/images-bugs/starlight_bugs_20230329115939830.png)
 
-   2. 解决：该问题可能源于不同Pytorch版本对除法的处理不一致。因此，将所有Tensor转为数值即可。
-   3. ```Python
+* 解决：该问题可能源于不同Pytorch版本对除法的处理不一致。因此，将所有Tensor转为数值即可。
+   ```Python
       input_size = []
       for _size in input_size_ori:
           if torch.is_tensor(_size):
               input_size.append(_size.item())
           else:
               input_size.append(_size)
-      ```
+   ```
 2. 使用NNI自动剪枝构图报错
-   1. ![img](../assets/images-bugs/starlight_bugs_20230329115938727.png)
+   ![img](../assets/images-bugs/starlight_bugs_20230329115938727.png)
 
-   2. 解决：调试发现原因在于无法识别自定义的模块MemoryEfficientSwish，该模块是一个激活函数，可以直接跳过。因此，改写tensorboard文件夹下的_pytorch_graph.py文件设置跳过该函数即可。
-   3. ```Python
+   * 解决：调试发现原因在于无法识别自定义的模块MemoryEfficientSwish，该模块是一个激活函数，可以直接跳过。因此，改写tensorboard文件夹下的_pytorch_graph.py文件设置跳过该函数即可。
+   ```Python
       class NodePyOP(NodePy):
           def __init__(self, node_cpp):
               super(NodePyOP, self).__init__(node_cpp, methods_OP)
@@ -384,21 +384,20 @@ pred1_s2 = pred1_s2[:, 0, :, :]
                   # raise ValueError('error')
                   self.attributes = []
                   self.kind = node_cpp.kind()
-      ```
+   ```
 3. 代码卡在_get_parent_layers()中死循环
-   1. 问题：lib/compression/pytorch/utils/shape_dependency.py中ChannelDependency()的_get_parent_layers()函数
-   2. 解决：避免遍历已遍历过的节点即可。添加一个travel_list，对于已经遍历过的节点不再遍历。
-   3. ![img](../assets/images-bugs/starlight_bugs_20230329115938983.png)
+   * 问题：lib/compression/pytorch/utils/shape_dependency.py中ChannelDependency()的_get_parent_layers()函数
+   * 解决：避免遍历已遍历过的节点即可。添加一个travel_list，对于已经遍历过的节点不再遍历。
+      ![img](../assets/images-bugs/starlight_bugs_20230329115938983.png)
 4. 无法识别自定义的Conv2dStaticSamePadding()模块
-   1. ![img](../assets/images-bugs/starlight_bugs_20230329115938715.png)
-
-   2. 问题：无法识别自定义的卷积层Conv2dStaticSamePadding()，导致后续层没有输入。
-   3. 解决：测试如下两种解决方案，测试后采用第二种：
+![img](../assets/images-bugs/starlight_bugs_20230329115938715.png)
+* 问题：无法识别自定义的卷积层Conv2dStaticSamePadding()，导致后续层没有输入。
+* 解决：测试如下两种解决方案，测试后采用第二种：
       1. 在lib/compression/pytorch/speedup/jit_translate.py中添加无法识别的操作函数。但对于卷积函数F.conv2d()，需要输入很多形参，而在识别时形参并没有传过来。因此，不推荐该方案；
       2. 将无法识别的Conv2dStaticSamePadding()模块改成可以识别的情况。即原始的Conv2dStaticSamePadding()是继承了nn.Conv2d，将其改为nn.Module即可，然后检查定义中需要修改的地方。推荐使用此方案。
    4. 使用方案2修改后的代码对比如下所示：
-      1. 原始代码，剪枝时无法识别以下模块：
-         1. ```Python
+      * 原始代码，剪枝时无法识别以下模块：
+         ```Python
             class Conv2dStaticSamePadding(nn.Conv2d):
                 """2D Convolutions like TensorFlow's 'SAME' mode, with the given input image size.
                    The padding mudule is calculated in construction function, then used in forward.
@@ -426,7 +425,7 @@ pred1_s2 = pred1_s2[:, 0, :, :]
                     return x
             ```
       2.  修改后的代码，剪枝时可自动识别：
-         1. ```Python
+         ```Python
             class Conv2dStaticSamePadding(nn.Module):
                 """2D Convolutions like TensorFlow's 'SAME' mode, with the given input image size.
                    The padding mudule is calculated in construction function, then used in forward.
@@ -473,26 +472,24 @@ pred1_s2 = pred1_s2[:, 0, :, :]
    6. x = F.interpolate(x, scale_factor=(8.0, 8.0), mode='bilinear', align_corners=False)
       1. ![img](../assets/images-bugs/starlight_bugs_20230329115940196.png)
 2. pycuda._driver.LogicError: cuMemcpyHtoDAsync failed: invalid argument
-   1. 问题：该错误由于初始化ModelSpeedupTensorRT设置的input_shape和推理时不一致所导致。
-   2. ```Python
-      engine = ModelSpeedupTensorRT(
-          model,
-          input_shape,
-          config=None,
-          calib_data_loader=calib_loader,
-          batchsize=args.batch_size,
-          ONNX_path=ONNX_path,
-          calibration_cache=cache_path,
-          extra_layer_bit=extra_layer_bit,
-      )
-      ```
-
-   3. 解决：保持训练和推理数据尺寸一致
+* 问题：该错误由于初始化ModelSpeedupTensorRT设置的input_shape和推理时不一致所导致。
+```Python
+   engine = ModelSpeedupTensorRT(
+      model,
+      input_shape,
+      config=None,
+      calib_data_loader=calib_loader,
+      batchsize=args.batch_size,
+      ONNX_path=ONNX_path,
+      calibration_cache=cache_path,
+      extra_layer_bit=extra_layer_bit,
+   )
+```
+* 解决：保持训练和推理数据尺寸一致
 3. 检查量化前后模型的输出——左图量化前，右图量化后，存在较大差异
-   1. ![img](../assets/images-bugs/starlight_bugs_20230329115939754.png)
-
-   2. 上述问题的根源在于，EfficientNet在解耦字符串时，会将其转换为list，去掉方括号即可解决上述问题。
-
+![img](../assets/images-bugs/starlight_bugs_20230329115939754.png)
+* 原因: EfficientNet在解耦字符串时，会将其转换为list
+* 解决：去掉方括号即可。
 ![img](../assets/images-bugs/starlight_bugs_20230329115940821.png)
 
 ## HSMNet (Location)
@@ -668,7 +665,7 @@ def forward(self, x):
 
 1. 导出Onnx之后，生成engine过程，报错：（应该是缺少ScatterND插件）
 
-   1. > [TensorRT] ERROR: INVALID_ARGUMENT: getPluginCreator could not find plugin ScatterND version 1
+   > [TensorRT] ERROR: INVALID_ARGUMENT: getPluginCreator could not find plugin ScatterND version 1
       >
       > ERROR: Fail to parse the ONNX file.
       >
@@ -693,16 +690,13 @@ https://blog.csdn.net/HW140701/article/details/120377483
 ### 剪枝问题记录
 
 1. 网络有两个输入，一个是RGB图，另一个是深度图
-   1. 解决：定义的FPGM的输入也需要将两个输入写成一个tuple传入，如下
-
+* 解决：定义的FPGM的输入也需要将两个输入写成一个tuple传入，如下
 ![img](../assets/images-bugs/starlight_bugs_20230329115946414.png)
 
 ### 量化问题记录
 
 1. 量化后的模型进行推理时，报错如下：
-
 ![img](../assets/images-bugs/starlight_bugs_20230329115946617.png)
 
-- 1. 解决：
-
+* 解决：
 ![img](../assets/images-bugs/starlight_bugs_20230329115946772.png)
