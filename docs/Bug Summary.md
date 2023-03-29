@@ -22,8 +22,7 @@ nav_order: 9
 * 原因：模型有三个输出，如下。其中第三个输出self.priors为常量，与输入无关，导致上述问题
 ![img](../assets/images-bugs/starlight_bugs_20230329115935476.png)
 * 解决：重写一个SSD模型文件，仅需改变两点。（1）将输出self.priors从SSD的forward函数中移出（2）在计算loss间，将self.priors放入output中
-![img](../assets/images-bugs/starlight_bugs_20230329115935488.png)
-![img](../assets/images-bugs/starlight_bugs_20230329115935446.png)
+![img](../assets/images-bugs/starlight_bugs_20230329115935488.png) ![img](../assets/images-bugs/starlight_bugs_20230329115935446.png)
 
 2. 导出剪枝模型后，推理时报错
 ```python
@@ -78,8 +77,7 @@ IndexError: too many indices for array: array is 1-dimensional, but 2 were index
 ```
 * 原因：剪枝后微调前精度很差，模型检测不出物体，bounding box为空，此时BB = BB[sorted_ind, :]中的sorted_ind为空list，导致出错
 * 解决：在SSD_Pytorch/data/voc_eval.py中修改两处（约143行和193行），修改如下
-![img](../assets/images-bugs/starlight_bugs_20230329115935533.png)
-![img](../assets/images-bugs/starlight_bugs_20230329115935583.png)
+![img](../assets/images-bugs/starlight_bugs_20230329115935533.png) ![img](../assets/images-bugs/starlight_bugs_20230329115935583.png)
 
 5. 模型剪枝后精度很难恢复 
 * 原因：模型微调前，使用剪枝前的optimizer，导致优化参数是剪枝前的参数，而非导出剪枝模型后的参数，所以微调效果有限
@@ -89,7 +87,7 @@ IndexError: too many indices for array: array is 1-dimensional, but 2 were index
 ### 量化问题记录
 
 1. lib包中的ModelSpeedupTensorRT的inference仅支持单输出，而检测模型是二输出
-   1. 解决：新建一个quan_model.py，重写SSD模型，修改内容为添加一个inference函数，作用是调用量化的trt模型得到双输出结果。修改如下：
+* 解决：新建一个quan_model.py，重写SSD模型，修改内容为添加一个inference函数，作用是调用量化的trt模型得到双输出结果。修改如下：
 * SSD模型添加load_engine函数
 ![img](../assets/images-bugs/starlight_bugs_20230329115935595.png)
 * SSD模型添加inference(self, x)，注意：由于要torch转onnx，所以要参考剪枝问题1设计模型
@@ -137,8 +135,7 @@ def inference(self, x):
         return result_cls, result_loc, elapsed_time
 ```
 * 推理前load_engine，推理中调用inference函数
-![img](../assets/images-bugs/starlight_bugs_20230329115935609-0062375.png)
-![img](../assets/images-bugs/starlight_bugs_20230329115935623.png)
+![img](../assets/images-bugs/starlight_bugs_20230329115935609-0062375.png) ![img](../assets/images-bugs/starlight_bugs_20230329115935623.png)
 
 2. 模型compress时，报如下错误：
 ```python
@@ -222,36 +219,36 @@ The element type in the input tensor is not defined.
      pip install OpenEXR
   ```
 * 可能出现的问题1：OpenEXR.cpp:36:10: fatal error: 'ImathBox.h' file not found
-   * 解决：apt-get install libopenexr-dev
-   * 引用：https://github.com/AcademySoftwareFoundation/openexr/issues/449
+* 解决：apt-get install libopenexr-dev
+* 引用：https://github.com/AcademySoftwareFoundation/openexr/issues/449
 * 可能出现的问题2：fatal error: 'ImathBox.h' file not found
-   * 解决：需要按照如下方式设置编译用的std
-   * 引用：https://github.com/google-research/kubric/issues/19
-  ```shell
-     export CFLAGS="-I/Users/USERNAME/homebrew/include/OpenEXR -std=c++11"
-     export LDFLAGS="-L/Users/USERNAME/homebrew/lib"
-     pip install OpenEXR
-  ```
+* 解决：需要按照如下方式设置编译用的std
+* 引用：https://github.com/google-research/kubric/issues/19
+```shell
+    export CFLAGS="-I/Users/USERNAME/homebrew/include/OpenEXR -std=c++11"
+    export LDFLAGS="-L/Users/USERNAME/homebrew/lib"
+    pip install OpenEXR
+```
 
 2. 两个输入问题
-   * 问题：网络包含两个输入
-   * 解决：将剪枝器（Pruner）如FPGMPruner的输入参数dummy_input改为元组(rand_inputs1, rand_inputs2)
+* 问题：网络包含两个输入
+* 解决：将剪枝器（Pruner）如FPGMPruner的输入参数dummy_input改为元组(rand_inputs1, rand_inputs2)
 
 3. 检查view维度不一致报错
-   * 问题：一个节点的输入只有一个维度
-   * 解决：加入维度数量判断
-   ![img](../assets/images-bugs/starlight_bugs_20230329115936623.png)
+* 问题：一个节点的输入只有一个维度
+* 解决：加入维度数量判断
+![img](../assets/images-bugs/starlight_bugs_20230329115936623.png)
 
 4. Update_mask()函数维度不一致报错
-   ![img](../assets/images-bugs/starlight_bugs_20230329115936736.png)
+![img](../assets/images-bugs/starlight_bugs_20230329115936736.png)
+* 解决：nni在构图时，其中两个卷积的前驱与后继判断错误。提前获取这两个卷积在网络中的名称，剪枝时设定剪枝算法跳过这两个卷积，不对它们进行剪枝即可。
 
-   * 解决：nni在构图时，其中两个卷积的前驱与后继判断错误。提前获取这两个卷积在网络中的名称，剪枝时设定剪枝算法跳过这两个卷积，不对它们进行剪枝即可。
 5. 模型尺寸过大，剪枝时单张卡放不下
-   * 解决：Debug剪枝时，先使用特别小的输入尺寸；确认剪枝可正常进行后，设定BatchSize为最小值，进行剪枝。
+* 解决：Debug剪枝时，先使用特别小的输入尺寸；确认剪枝可正常进行后，设定BatchSize为最小值，进行剪枝。
 
 6. 模型剪枝完成，但后续的3D卷积没有剪枝，导致模型剪枝部分的最后一层输出与后续未剪枝部分的输入不匹配
-   ![img](../assets/images-bugs/starlight_bugs_20230329115938611.png)
-   * 解决：剪枝部分的最后一个卷积的输出通道全都不剪
+![img](../assets/images-bugs/starlight_bugs_20230329115938611.png)
+* 解决：剪枝部分的最后一个卷积的输出通道全都不剪
 
 ### 量化问题记录
 
