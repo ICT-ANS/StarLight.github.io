@@ -17,22 +17,19 @@ nav_order: 2
 
 
 ## Installation
-- Create a conda envirment. You can use the Tsinghua source for the conda and pip to accelerate installation. 
-
+- Create a conda envirment. You can use the Tsinghua source for the conda and pip to accelerate installation.
 ```shell
   conda create -n starlight python=3.6
   conda activate starlight
 ```
 
 - Install PyTorch and cuDNN.
-
 ```shell
   conda install pytorch=1.6.0 torchvision=0.7.0 cudatoolkit=10.2
   conda install --channel https://conda.anaconda.org/nvidia cudnn=8.0.0
 ```
 
 - Install TensorRT.
-
 ```shell
   # Go to https://developer.nvidia.com/compute/machine-learning/tensorrt
   # Download TensorRT-7.1.3.4.Ubuntu-18.04.x86_64-gnu.cuda-10.2.cudnn8.0.tar.gz 
@@ -49,14 +46,12 @@ nav_order: 2
 ```
 
 - Install PYQT5 and PyQtWebEngine:
-
 ```shell
   pip install pyqt5==5.12
   pip install PyQtWebEngine==5.12
 ```
 
 - Install other packages.
-
 ```shell
   pip install easydict opencv-python flask flask_cors gevent imageio pynvml pyyaml psutil matplotlib pycocotools Cython thop schema prettytable
   pip install onnx==1.11.0 pycuda==2019.1.1 tensorboard==2.9.1 tqdm
@@ -66,7 +61,6 @@ nav_order: 2
 ## Bugs and solutions
 
 - If `libnvinfer.so.7` or `libcudnn.so.8` is missing when you import the tensorrt, simply specify there direction in the `~/.bashrc`:
-
 ```shell
 # search their direction
 find / -name libnvinfer.so.7
@@ -78,7 +72,6 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/anaconda3/envs/starlight/lib
 ```
 
 - If ImportError: /lib/x86_64-linux-gnu/libm.so.6: version `GLIBC_2.27' not found, build GLIBC_2.27 manually:
-
 ```shell
 # download glibc-2.27
 wget http://ftp.gnu.org/gnu/glibc/glibc-2.27.tar.gz

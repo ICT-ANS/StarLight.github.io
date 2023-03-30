@@ -26,7 +26,6 @@ nav_order: 5
 
 ## Generate necessary information during your pruning or quantization.
 * Before pruning or quantization, add the code below:
-
 ```python
   # for pruning or quantization
   if args.write_yaml:
@@ -45,7 +44,6 @@ nav_order: 5
 ```
 
 * After pruning (usually requires fine-tuning) or quantization, add the code below:
-
 ```python
   # for pruning: 
   if epoch == args.finetune_epochs - 1:
@@ -80,7 +78,6 @@ nav_order: 5
 ## (Optional) Compress your network in StarLight using the online mode.
 * Create a script `compress.sh` in the folder of `algorithms/compression/nets/YOUR_MODEL/shell`.
 * Define the required hyper-parameters as below:
-
 ```shell
   dataset=$1
   model=$2
@@ -95,7 +92,6 @@ nav_order: 5
   output_path=${11}
   dataset_path=${12}
 ```
-
 * Use the above hyper-parameters to start your pruning or quantization. Please refer to our provided examples in `algorithms/compression/nets/ResNet50/shell/compress.sh` to write your startup command.
 
 ## Visualization of network features.

@@ -16,7 +16,6 @@ nav_order: 3
 
 ## Pruning
 1. Load your pre-trained network:
-
 ```python
   # get YourPretarinedNetwork and load pre-trained weights for it
   model = YourPretarinedNetwork(args).to(device)
@@ -24,7 +23,6 @@ nav_order: 3
 ```
 
 2. Set `config_list` and choose a suitable pruner:
-
 ```python
   from lib.algorithms.pytorch.pruning import (TaylorFOWeightFilterPruner, FPGMPruner, AGPPruner)
 
@@ -62,13 +60,11 @@ nav_order: 3
   else:
       raise NotImplementedError
 ```
-
 * `sparsity` specifies the pruning sparsity, ranging from 0.0 to 1.0. Larger sparsity corresponds to a more lightweight model.
 * `op_types` specifies the type of pruned operation and can be either `Conv2d` or `Conv3d`, or both of them.
 * `optimizer`, `trainer`, and `criterion` are the same as pre-training your network.
 
 3. Use the pruner to generate the pruning mask
-
 ```python
   # generate and export the pruning mask
   pruner.compress()
@@ -77,12 +73,10 @@ nav_order: 3
     os.path.join(args.save_dir, 'mask.pth')
   )
 ```
-
 * `model_masked.pth` includes the model weights and the generated pruning mask.
 * `mask.pth` only includes the generated pruning mask.
 
 4. Export your pruned model:
-
 ```python
   from lib.compression.pytorch import ModelSpeedup
 
@@ -95,17 +89,16 @@ nav_order: 3
   m_speedup = ModelSpeedup(model, torch.rand(input_shape).to(device), masks_file, device)
   m_speedup.speedup_model()
 ```
-
 * `input_shape` denotes the shape of your model inputs with `batchsize=1`. 
 * This automatic export method is susceptible to errors when unrecognized structures are present in your model. To assist in resolving any bugs that may arise during the pruning process, we have compiled a summary of known issues in our [Bug Summary](https://github.com/ICT-ANS/StarLight).
+* If there are too many errors and it's hard to solve, we recommend you to manually export the pruned model by providing the topology structures of networks. Please refer to this [link](https://ict-ans.github.io/StarLight.github.io/docs/Manually%20Export.html) for more details.
 
 5. Fine-tune your pruned model:
-* To fine-tune the pruned model, we recommend following your own pre-training process. 
-* Since the pruned model has pre-trained weights and fewer parameters, we suggest using a smaller `learning_rate` during the fine-tuning process.
+* To fine-tune the pruned model, we suggest following your own pre-training process to minimize the performance drop. 
+* Since the pruned model has pre-trained weights and fewer parameters, a smaller `learning_rate` may be more effective during the fine-tuning.
 
 ## Quantization
 1. Load your pre-trained network:
-
 ```python
   # get YourPretarinedNetwork and load pre-trained weights for it
   model = YourPretarinedNetwork(args).to(device)
@@ -113,7 +106,6 @@ nav_order: 3
 ```
 
 2. Initialize the dataloader:
-
 ```python
   import torchvision.datasets as datasets
 
@@ -135,11 +127,9 @@ nav_order: 3
       return train_loader, val_loader, calib_loader
   train_loader, val_loader, calib_loader = get_data_loader(args)
 ```
-
 * `calib_loader` uses a subset from the training dataset to calibrate during subsequent quantization.
 
 3. Specify `quan_mode` and output paths of onnx, trt, and cache:
-
 ```python
   onnx_path = os.path.join(args.save_dir, '{}_{}.onnx'.format(args.model, args.quan_mode))
   trt_path = os.path.join(args.save_dir, '{}_{}.trt'.format(args.model, args.quan_mode))
@@ -156,7 +146,6 @@ nav_order: 3
 ```
 
 4. Define the `engine` for inference:
-
 ```python
   from lib.compression.pytorch.quantization_speedup import ModelSpeedupTensorRT
 
@@ -178,11 +167,9 @@ nav_order: 3
 ```
 
 5. Use the `engine` for inference:
-
 ```python
   loss, top1, infer_time = validate(engine, val_loader, criterion)
 ```
-
 * `engine` is similar to the `model` and can be inferred on either GPU or TensorRT. 
 * While the `eval()` method is necessary for `model` inference, it is not required for `engine`.
 * Inference with `engine` will return both the outputs and the inference time.
