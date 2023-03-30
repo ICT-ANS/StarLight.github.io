@@ -210,7 +210,6 @@ def forward(self, x):
 ![img](../assets/images-bugs/starlight_bugs_20230329115945661.png)
 * 报错如下
 ![img](../assets/images-bugs/starlight_bugs_20230329115945709.png)
-
 * 网上查找，类似的错误https://stackoverflow.com/questions/66746307/torch-jit-trace-tracerwarning-converting-a-tensor-to-a-python-boolean-might-c
 * 解决：前向传播不要出现不确定的判断语句if或for等。由于调试时每次if语句都为真，因此删除if判断，直接运行if条件下的语句
 ![img](../assets/images-bugs/starlight_bugs_20230329115945581.png)
