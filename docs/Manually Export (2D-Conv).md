@@ -1,11 +1,11 @@
 ---
 layout: default
-title: Manually Export
+title: Manually Export (2D-Conv)
 nav_order: 4
 ---
 
 
-# Manually export your pruned network
+# Manually export your network by pruning 2D-Conv
 {: .no_toc }
 
 ## Table of contents
@@ -74,7 +74,7 @@ nav_order: 4
                     last_conv = name
 ```
 
-* Results of the generated inplace_dict:
+* Results of the generated `inplace_dict`:
 ```python
     inplace_dict = {
         # feature extraction
