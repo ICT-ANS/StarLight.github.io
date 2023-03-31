@@ -30,7 +30,7 @@ nav_order: 5
   * For complex network architectures, you can generate the `conv3d_inplace_dict` using the following code and then manually adjust some structures. 
   * We provide examples of `conv3d_inplace_dict` in the following.
 
-* Example for generating the `conv3d_inplace_dict`:
+* Example for generating the `conv3d_inplace_dict` is as follows:
 ```python
     # take the HSMNet as an example, use the code blow to get the inplace_dict of 3D conv
     last_conv = None
@@ -192,7 +192,6 @@ nav_order: 5
     'decoder3.classify.0.1': ('decoder3.classify.0.0',),
     'decoder3.classify.2.0': ('decoder3.classify.0.0',),
 }
-
 ```
 
 ## Specify the `prune_ops`:
