@@ -58,7 +58,7 @@ nav_order: 5
                 last_conv = name
 ```
 
-* Results of the generated `conv3d_inplace_dict`:
+* The generated `conv3d_inplace_dict` is as below:
 ```python
     conv3d_inplace_dict = {
     # decoder6

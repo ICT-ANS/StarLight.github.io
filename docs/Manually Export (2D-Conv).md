@@ -41,7 +41,7 @@ nav_order: 4
   * For complex network architectures, you can generate the `inplace_dict` using the following code and then manually adjust some structures. 
   * We provide examples of `inplace_dict` in the following.
 
-* Example for generating the `inplace_dict`:
+* The generated `inplace_dict` is as below:
 ```python
     # take the HSMNet as an example, use the code blow to get the inplace_dict of 2D conv
     last_conv = None
