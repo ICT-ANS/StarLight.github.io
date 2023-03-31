@@ -1,6 +1,6 @@
 ---
 layout: default
-title: Manually Export (2D-Conv)
+title: Manually Export (3D-Conv)
 nav_order: 5
 ---
 
