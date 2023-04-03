@@ -429,7 +429,6 @@ def replace_conv3d(conv, input_mask, output_mask):
         The conv3d module to be replaced
     mask : ModuleMasks
         The masks of this module
-
     Returns
     -------
     torch.nn.Conv3d
@@ -445,7 +444,6 @@ def replace_conv3d(conv, input_mask, output_mask):
     else:
         out_channels_index = get_index(output_mask)
         out_channels = len(out_channels_index)
-
     if conv.groups != 1:
         new_conv = torch.nn.Conv3d(in_channels=in_channels,
                                    out_channels=out_channels,
@@ -466,10 +464,8 @@ def replace_conv3d(conv, input_mask, output_mask):
                                    groups=conv.groups,
                                    bias=conv.bias is not None,
                                    padding_mode=conv.padding_mode)
-    # print(new_conv.weight.data.shape)
     new_conv.to(conv.weight.device)
     tmp_weight_data = tmp_bias_data = None
-
     if output_mask is not None:
         tmp_weight_data = torch.index_select(conv.weight.data, 0, out_channels_index)
         if conv.bias is not None:
@@ -503,10 +499,8 @@ def replace_conv3d(conv, input_mask, output_mask):
                 new_conv.weight.data[f_start:f_end] = torch.index_select(tmp_weight_data[f_start:f_end], 1, current_input_index)
     else:
         new_conv.weight.data.copy_(tmp_weight_data)
-
     if conv.bias is not None:
         new_conv.bias.data.copy_(conv.bias.data if tmp_bias_data is None else tmp_bias_data)
-
     return new_conv
 
 ``` 
@@ -521,7 +515,6 @@ def replace_batchnorm3d(norm, mask):
         The batchnorm module to be replace
     mask : ModuleMasks
         The masks of this module
-
     Returns
     -------
     torch.nn.BatchNorm3d
@@ -551,7 +544,6 @@ def get_module_by_name(model, module_name):
         the pytorch model from which to get its module
     module_name : str
         the name of the required module
-
     Returns
     -------
     module, module
